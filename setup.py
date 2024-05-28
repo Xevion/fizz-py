@@ -47,7 +47,8 @@ class CMakeBuild(build_ext):
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
-            f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm
+            f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm,
+            f"-DCMAKE_TOOLCHAIN_FILE={ext.sourcedir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         ]
         build_args = []
         # Adding CMake arguments set as environment variable
@@ -132,7 +133,7 @@ setup(
     author_email="ryan@walters.to",
     description="C++ Bindings for Fizz, a TLS 1.3 library",
     long_description="",
-    ext_modules=[CMakeExtension("cmake_example")],
+    ext_modules=[CMakeExtension("fizzpy")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
     extras_require={"test": ["pytest>=6.0"]},
