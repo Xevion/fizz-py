@@ -1,9 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(FizzPyh)
+project(FizzPy)
+
+if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+endif()
 
 find_package(fizz CONFIG REQUIRED)
 
-add_executable(Fizz main.cpp)
+add_subdirectory(pybind11)
+pybind11_add_module(fizzpy main.cpp)
 
-target_link_libraries(Fizz PRIVATE fizz::fizz)
+target_link_libraries(fizzpy PRIVATE fizz::fizz)
