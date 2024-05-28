@@ -1,0 +1,17 @@
+{
+  "name": "fizzpy",
+  "dependencies": [
+    "fizz",
+    {
+      "name": "libsodium",
+      "version>=": "1.0.18"
+    }
+  ],
+  "overrides": [
+    {
+      "name": "libsodium",
+      "version": "1.0.18"
+    }
+  ],
+  "builtin-baseline": "007aaced1a9d3245e28a2ba9395dca88ea890db1"
+}
