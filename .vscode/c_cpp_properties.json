@@ -4,13 +4,16 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/build/vcpkg_installed/**"
+                "${workspaceFolder}/build/vcpkg_installed/**",
+                "${workspaceFolder}/pybind11/include/**",
+                "/usr/include/python3.10/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c17",
             "cppStandard": "c++14",
-            "intelliSenseMode": "linux-clang-x64"
+            "intelliSenseMode": "linux-clang-x64",
+            "configurationProvider": "ms-vscode.cmake-tools"
         }
     ],
     "version": 4
