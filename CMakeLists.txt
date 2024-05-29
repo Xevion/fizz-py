@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.15...3.26)
 
-project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX)
+project(
+  ${SKBUILD_PROJECT_NAME}
+  VERSION ${SKBUILD_PROJECT_VERSION}
+  LANGUAGES CXX)
 
 if (NOT DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   message(FATAL_ERROR "Please set VCPKG_ROOT to the root of your vcpkg installation, or set CMAKE_TOOLCHAIN_FILE to the path to the vcpkg.cmake file")
