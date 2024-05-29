@@ -1,10 +1,12 @@
 [build-system]
-requires = ["scikit-build-core", "pybind11"]
+requires = ["scikit-build-core>=0.3.3", "pybind11"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "fizzpy"
 version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.10"
 
 [tool.scikit-build.cmake.define]
 CMAKE_TOOLCHAIN_FILE = "./vcpkg/scripts/buildsystems/vcpkg.cmake"
