@@ -1,7 +1,7 @@
 {
   "name": "fizzpy",
   "dependencies": [
-    { "name": "fizz", "version>=": "2024.05.06.00" },
+    { "name": "fizz", "version>=": "2024.05.20.00" },
     { "name": "libsodium", "version>=": "1.0.18" }
   ],
   "overrides": [{ "name": "libsodium", "version": "1.0.18" }],
