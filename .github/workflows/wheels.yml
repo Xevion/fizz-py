@@ -25,6 +25,7 @@ jobs:
       - name: Setup anew vcpkg
         uses: lukka/run-vcpkg@v11
         with:
+            vcpkgDirectory: ${{ github.workspace}}/vcpkg
             runVcpkgInstall: true
 
       - uses: pypa/cibuildwheel@v2.17
