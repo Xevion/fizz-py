@@ -1,9 +1,9 @@
 [submodule "pybind11"]
 	path = pybind11
 	url = https://github.com/pybind/pybind11
-	branch = stable
+	branch = 7187894e02313836696ab2ea15a688aa09ce43e1
 
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg
-	branch = master
+	branch = 007aaced1a9d3245e28a2ba9395dca88ea890db1

@@ -20,11 +20,11 @@ jobs:
         with:
             useCloudCache: false
             cmakeVersion: 3.22.1
-    
-      - name: Bootstrap Vcpkg
-        run: |
-          ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install
+
+      - name: Setup anew vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+            runVcpkgInstall: true
 
       - uses: pypa/cibuildwheel@v2.17
         env:
