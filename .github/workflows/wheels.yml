@@ -14,16 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-            submodules: true
+            submodules: "recursive"
 
       - uses: lukka/get-cmake@latest
         with:
+            useCloudCache: false
             cmakeVersion: 3.22.1
     
       - name: Bootstrap Vcpkg
         run: |
           ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpgk/vcpkg install
+          ./vcpkg/vcpkg install
 
       - uses: pypa/cibuildwheel@v2.17
         env:
