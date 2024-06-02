@@ -53,7 +53,9 @@ jobs:
           path: dist
 
       - name: Build Wheel
-        run: pip run build --wheel
+        run: |
+          pip install build  
+          python -m build --wheel
 
       # - uses: pypa/cibuildwheel@v2.17
       #   env:
