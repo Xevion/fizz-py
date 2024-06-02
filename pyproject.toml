@@ -8,6 +8,8 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.10"
 
+[tool.scikit-build]
+cmake.build-type = "Release"
 [tool.scikit-build.cmake.define]
 CMAKE_TOOLCHAIN_FILE = "./vcpkg/scripts/buildsystems/vcpkg.cmake"
 
