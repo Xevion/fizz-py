@@ -33,9 +33,9 @@ jobs:
             fetch-depth: 0
             submodules: "recursive"
 
-      - uses: lukka/get-cmake@latest
+      - uses: lukka/get-cmake@dev/ninja-1.12.1
         with:
-            useCloudCache: false
+            useCloudCache: true
             cmakeVersion: 3.22.1
 
       - uses: lukka/run-vcpkg@v11
