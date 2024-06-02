@@ -24,6 +24,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-13]
+        python: ['3.10']
         # os: [ubuntu-latest, windows-latest, macos-13, macos-14]
     
     steps:
@@ -37,24 +38,22 @@ jobs:
             useCloudCache: false
             cmakeVersion: 3.22.1
 
-      - name: Setup anew vcpkg
-        uses: lukka/run-vcpkg@v11
+      - uses: lukka/run-vcpkg@v11
         with:
             vcpkgDirectory: ${{ github.workspace}}/vcpkg
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-            python-version: '3.10'
+            python-version: ${{ matrix.python }}
       
-      - uses: actions/download-artifact@v4
+      - name: Download Source Distribution
+        uses: actions/download-artifact@v4
         with:
           name: sdist
           path: dist
 
-      - name: Build wheels
-        run: |
-          pipx run build --wheel
+      - name: Build Wheel
+        run: pip run build --wheel
 
       # - uses: pypa/cibuildwheel@v2.17
       #   env:
@@ -62,7 +61,8 @@ jobs:
       #       CIBW_ARCHS_MACOS: universal2
       #       CIBW_ARCHS_WINDOWS: auto ARM64
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Wheel
+        uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-${{ strategy.job-index }}
           path: dist/*.whl
