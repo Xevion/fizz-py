@@ -12,6 +12,7 @@ int add(int i, int j) {
 
 auto versions() {
   auto context = fizz::client::FizzClientContext();
+  context.setSupportedVersions({fizz::ProtocolVersion::tls_1_3_26_fb, fizz::ProtocolVersion::tls_1_3_28, fizz::ProtocolVersion::tls_1_3});
   return context.getSupportedVersions();
 }
 
