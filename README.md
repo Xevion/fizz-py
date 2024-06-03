@@ -23,6 +23,23 @@ pip3 install ./
 
 `VCPKG_ROOT` is usually used as an environment variable, but it's not stable in my experience. Directly setting the `CMAKE_TOOLCHAIN_FILE` is more reliable.
 
+## TODO
+
+- [ ] Send an actual request
+- [ ] Explore async bindings
+- [ ] Find lowest working Python version
+- [ ] Implement CI/CD pytest invocations
+- [ ] Test various Python architectures
+- [ ] Revisit `cibuildwheel`, open issues on current issues
+  - Manual workflow invocation to lower costs while testing
+
+### Fizz Reference Files
+
+- [FizzClientContext.h](https://github.com/facebookincubator/fizz/blob/main/fizz/client/FizzClientContext.h) The primary object containing most of the settable client TLS options.
+- [FizzClientCommand.cpp](https://github.com/facebookincubator/fizz/blob/main/fizz/tool/FizzClientCommand.cpp) A CLI tool for sending requests in a demo context. This is the primary inspiration for the project's usage.
+- [fizz/record/Types.h](https://github.com/facebookincubator/fizz/blob/main/fizz/record/Types.h) Contains many of the special enums and the values used for TLS options on the client.
+- [FizzServerCommand.cpp](https://github.com/facebookincubator/fizz/blob/main/fizz/tool/FizzServerCommand.cpp) A CLI tool for receiving requests in a demo context. This isn't necessary for development of the bindings, but it's a useful reference.
+
 ### Reference Material
 
 Repositories, files, GitHub Actions, workflows or any reference I found useful in creating this project.
