@@ -26,26 +26,26 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-13]
         python: ['3.10']
         # os: [ubuntu-latest, windows-latest, macos-13, macos-14]
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
-            fetch-depth: 0
-            submodules: "recursive"
+          fetch-depth: 0
+          submodules: 'recursive'
 
       - uses: lukka/get-cmake@dev/ninja-1.12.1
         with:
-            useCloudCache: true
-            cmakeVersion: 3.22.1
+          useCloudCache: true
+          cmakeVersion: 3.22.1
 
       - uses: lukka/run-vcpkg@v11
         with:
-            vcpkgDirectory: ${{ github.workspace}}/vcpkg
+          vcpkgDirectory: ${{ github.workspace}}/vcpkg
 
       - uses: actions/setup-python@v5
         with:
-            python-version: ${{ matrix.python }}
-      
+          python-version: ${{ matrix.python }}
+
       - name: Download Source Distribution
         uses: actions/download-artifact@v4
         with:
@@ -63,8 +63,19 @@ jobs:
       #       CIBW_ARCHS_MACOS: universal2
       #       CIBW_ARCHS_WINDOWS: auto ARM64
 
+      - name: Prepare Artifact Name
+        id: prepare_artifact_name
+        shell: python
+        run: |
+          import os, glob
+          wheels = glob.glob('dist/*.whl')
+          assert len(wheels) == 1, f"Expected 1 wheel, got {len(wheels)}"
+          with open(os.environ['GITHUB_OUTPUT'], 'w') as f:
+            f.write(f"name={os.path.basename(wheels[0])}\n")
+
       - name: Upload Wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: ${{ steps.prepare_artifact_name.outputs.name }}
           path: dist/*.whl
+          if-no-files-found: error
