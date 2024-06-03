@@ -18,7 +18,7 @@ cd fizz-py
 git submodule update --init --recursive # Ensure submodules are available (if you forgot to clone recursively)
 ./vcpkg/bootstrap-vcpkg.sh
 ./vcpkg/vcpkg install
-pip3 install ./
+./generate.sh
 ```
 
 `VCPKG_ROOT` is usually used as an environment variable, but it's not stable in my experience. Directly setting the `CMAKE_TOOLCHAIN_FILE` is more reliable.
@@ -32,6 +32,25 @@ pip3 install ./
 - [ ] Test various Python architectures
 - [ ] Revisit `cibuildwheel`, open issues on current issues
   - Manual workflow invocation to lower costs while testing
+
+## Requirements
+
+- [ ] `-host` / `-port` Large-scale C++ class handling. Unknown difficulty.
+- [ ] `-verify` Pure C++ handler. Unknown difficulty.
+- [ ] `-cert` (Requires -key) Small C++ handler using `openssl::CertUtils::makeSelfCert` with `FizzClientContext::setClientCertificate`.
+- [ ] `-key` See `-cert` for details.
+- [ ] `-pass` See `-cert` for details (password for the \[private] key).
+- [ ] `-capath` Medium difficulty. Pure C++, all TLS implementation. May be workable, may be difficult.
+- [ ] `-keylog` High difficulty. Pure C++ due to performance implications. Largely tied up with Connection handling, core part of TLS.
+- [ ] `-servername` Easy, handled by the `Connection` class.
+- [ ] `-alpn` Easy; part of `FizzClientContext`.
+- [ ] `-certcompression` Unknown difficulty. Pure C++ due to performance implications, supported by custom handler.
+- [ ] `-early` Easy, part of `FizzClientContext`.
+- [ ] `-httpproxy` Medium/unknown difficulty, pure C++, but handled by the `Connection` class.
+- [ ] `-ciphers` Easy, part of `FizzClientContext`.
+- [ ] `-sigschemes` Easy, part of `FizzClientContext`.
+- [ ] `-curves` Easy, part of `FizzClientContext`.
+- [ ] `-delegatedcred` Medium difficulty. Pure C++, but mostly handled by `FizzClientContext`.
 
 ### Fizz Reference Files
 
