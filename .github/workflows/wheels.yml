@@ -18,7 +18,7 @@ jobs:
           path: dist
 
   build_wheels:
-    name: Build wheel for ${{ matrix.os }} with Python ${{ matrix.python }}
+    name: "Wheel: ${{ matrix.os }} for Python ${{ matrix.python }}"
     needs: [build_sdist]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
           submodules: 'recursive'
 
-      - uses: lukka/get-cmake@dev/ninja-1.12.1
+      - uses: lukka/get-cmake@main
         with:
           useCloudCache: true
           cmakeVersion: 3.22.1
