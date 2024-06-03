@@ -11,10 +11,8 @@ authors = [{name = "Ryan Walters", email = "ryan@walters.to"}]
 
 [tool.scikit-build]
 cmake.build-type = "Release"
+# cmake.verbose = true
+# logging.level = "DEBUG"
+
 [tool.scikit-build.cmake.define]
 CMAKE_TOOLCHAIN_FILE = "./vcpkg/scripts/buildsystems/vcpkg.cmake"
-
-[tool.cibuildwheel.linux]
-before-all = [
-  "yum install -y perl-IPC-Cmd zip"
-]
