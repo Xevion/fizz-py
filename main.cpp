@@ -12,7 +12,7 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(fizzpy, m)
 {
-  m.doc() = "C++ Bindings for Fizz, a TLS 1.3 library from Facebook"; // optional module docstring
+  m.doc() = "Python Bindings for Fizz, a TLS 1.3 library from Facebook"; // optional module docstring
 
   py::enum_<fizz::ProtocolVersion>(m, "ProtocolVersion")
       .value("tls_1_0", fizz::ProtocolVersion::tls_1_0)
