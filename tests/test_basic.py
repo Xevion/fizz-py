@@ -12,24 +12,25 @@ def test_versions(client):
     assert client.getSupportedVersions() == [fizzpy.ProtocolVersion.tls_1_0]
 
 def test_ciphers(client):
-    return
+    client.setSupportedCiphers([fizzpy.CipherSuite.TLS_AES_128_GCM_SHA256])
+    assert client.getSupportedCiphers() == [fizzpy.CipherSuite.TLS_AES_128_GCM_SHA256]
 
 
 def test_sig_schemes(client):
-    return
+    pass
 
 
 def test_supported_groups(client):
-    return
+    pass
 
 
 def test_shares(client):
-    return
+    pass
 
 
 def test_supported_psk_modes(client):
-    return
+    pass
 
 
 def test_supported_alpns(client):
-    return
+    pass

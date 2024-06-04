@@ -73,6 +73,11 @@ PYBIND11_MODULE(fizzpy, m)
       .value("rsa_pss_sha256_batch", fizz::SignatureScheme::rsa_pss_sha256_batch)
       .export_values();
 
+  py::enum_<fizz::client::SendKeyShare>(m, "SendKeyShare")
+      .value("Always", fizz::client::SendKeyShare::Always)
+      .value("WhenNecessary", fizz::client::SendKeyShare::WhenNecessary)
+      .export_values();
+
   py::class_<fizz::client::FizzClientContext>(m, "FizzClientContext")
       .def(py::init<>())
       .def("setSupportedVersions", &fizz::client::FizzClientContext::setSupportedVersions)
@@ -88,8 +93,23 @@ PYBIND11_MODULE(fizzpy, m)
       .def("setSupportedPskModes", &fizz::client::FizzClientContext::setSupportedPskModes)
       .def("getSupportedPskModes", &fizz::client::FizzClientContext::getSupportedPskModes)
       .def("setSupportedAlpns", &fizz::client::FizzClientContext::setSupportedAlpns)
-      .def("getSupportedAlpns", &fizz::client::FizzClientContext::getSupportedAlpns);
+      .def("getSupportedAlpns", &fizz::client::FizzClientContext::getSupportedAlpns)
+      .def("setSendEarlyData", &fizz::client::FizzClientContext::setSendEarlyData)
+      .def("getSendEarlyData", &fizz::client::FizzClientContext::getSendEarlyData)
+      .def("setCompatibilityMode", &fizz::client::FizzClientContext::setSendEarlyData)
+      .def("getCompatibilityMode", &fizz::client::FizzClientContext::getSendEarlyData)
+      .def("setOmitEarlyRecordLayer", &fizz::client::FizzClientContext::setOmitEarlyRecordLayer)
+      .def("getOmitEarlyRecordLayer", &fizz::client::FizzClientContext::getOmitEarlyRecordLayer)
+      .def("setRequireAlpn", &fizz::client::FizzClientContext::setRequireAlpn)
+      .def("getRequireAlpn", &fizz::client::FizzClientContext::getRequireAlpn)
+      .def("setClock", &fizz::client::FizzClientContext::setClock)
+      .def("getClock", &fizz::client::FizzClientContext::getClock)
+      .def("setMaxPskHandshakeLife", &fizz::client::FizzClientContext::setMaxPskHandshakeLife)
+      .def("getMaxPskHandshakeLife", &fizz::client::FizzClientContext::getMaxPskHandshakeLife)
+      .def("setSendKeyShare", &fizz::client::FizzClientContext::setSendKeyShare)
+      .def("getSendKeyShare", &fizz::client::FizzClientContext::getSendKeyShare);
+
+    // missing: setClientCertManager, getCertManager, getECHPolicy, setPskCache, getPskCache, getPskCacheShared, getPsk, putPsk, removePsk, setFactory, getFactory, getFactoryPtr, setCertDecompressionManager, getSupportedCertDecompressionAlgorithms, getCertDecompressorForAlgorithm
 
   // m.def("add", &add, "A function that adds two numbers");
-  // m.def("versions", &versions, "A function that returns the supported versions");
 }

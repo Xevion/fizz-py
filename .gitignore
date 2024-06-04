@@ -1,6 +1,10 @@
 build/
 CMakeFiles/
 dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
 
 # Prerequisites
 *.d

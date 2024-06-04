@@ -43,13 +43,13 @@ git submodule update --init --recursive # Ensure submodules are available (if yo
 - [ ] `-capath` Medium difficulty. Pure C++, all TLS implementation. May be workable, may be difficult.
 - [ ] `-keylog` High difficulty. Pure C++ due to performance implications. Largely tied up with Connection handling, core part of TLS.
 - [ ] `-servername` Easy, handled by the `Connection` class.
-- [ ] `-alpn` Easy; part of `FizzClientContext`.
+- [ ] `-alpn` Easy; part of `FizzClientContext::setSupportedVersions`.
 - [ ] `-certcompression` Unknown difficulty. Pure C++ due to performance implications, supported by custom handler.
 - [ ] `-early` Easy, part of `FizzClientContext`.
 - [ ] `-httpproxy` Medium/unknown difficulty, pure C++, but handled by the `Connection` class.
-- [ ] `-ciphers` Easy, part of `FizzClientContext`.
-- [ ] `-sigschemes` Easy, part of `FizzClientContext`.
-- [ ] `-curves` Easy, part of `FizzClientContext`.
+- [ ] `-ciphers` Easy, provided by`FizzClientContext::setSupportedCiphers`.
+- [ ] `-sigschemes` Easy, provided by `FizzClientContext::setSupportedSigSchemes`.
+- [ ] `-curves` Easy, provided by `FizzClientContext::setSupportedGroups`.
 - [ ] `-delegatedcred` Medium difficulty. Pure C++, but mostly handled by `FizzClientContext`.
 
 ### Fizz Reference Files
@@ -63,11 +63,14 @@ git submodule update --init --recursive # Ensure submodules are available (if yo
 
 Repositories, files, GitHub Actions, workflows or any reference I found useful in creating this project.
 
+- [RainbowRobotics/rbpodo](https://github.com/RainbowRobotics/rbpodo)
+  - [python/CMakeLists.txt](https://github.com/RainbowRobotics/rbpodo/blob/main/python/CMakeLists.txt) [pyproject.toml](https://github.com/RainbowRobotics/rbpodo/blob/main/pyproject.toml) [build-and-test.yml](https://github.com/RainbowRobotics/rbpodo/blob/main/.github/workflows/build-and-test.yml)
+  - Cmake11, non-virtualized (cibuildwheel) matrix builds, Pybind11, C++ and Python first-class bindings
 - [pybind/scikit_build_example](https://github.com/pybind/scikit_build_example)
   - [CMakeLists.txt](https://github.com/pybind/scikit_build_example/blob/master/CMakeLists.txt)
   - [.github/workflows/wheels.yml](https://github.com/pybind/scikit_build_example/blob/master/.github/workflows/wheels.yml)
   - [pyproject.toml](https://github.com/pybind/scikit_build_example/blob/master/pyproject.toml)
-- [cibuildwheel docs](https://cibuildwheel.pypa.io/en/stable/)
+- [cibuildwheel - docs](https://cibuildwheel.pypa.io/en/stable/)
 - [vcpkg.link - fizz](https://vcpkg.link/ports/fizz)
 - [vcpkg.link - libsodium](https://vcpkg.link/ports/libsodium)
 - [Homebrew/homebrew-core/Formula/f/fizz.rb](https://github.com/Homebrew/homebrew-core/blob/c1534daa2f467d9924d02333fd0aed8dbf17f465/Formula/f/fizz.rb#L60)
@@ -76,3 +79,8 @@ Repositories, files, GitHub Actions, workflows or any reference I found useful i
 - [lukka/run-cmake](https://github.com/lukka/get-cmake)
 - [caiorss/example-pybind11-vcpkg](https://github.com/caiorss/example-pybind11-vcpkg)
 - [bloomberg/memray/.github/workflows/build_wheels.yml](https://github.com/bloomberg/memray/blob/main/.github/workflows/build_wheels.yml)
+- [actions/setup-python](https://github.com/actions/setup-python)
+- [CMake `add_custom_target`](https://cmake.org/cmake/help/latest/command/add_custom_target.html)
+- [pybind11 - Avoiding C++ types in docstrings](https://pybind11.readthedocs.io/en/latest/advanced/misc.html#avoiding-cpp-types-in-docstrings)
+- [pybind11 - Allow/Prohibit None Types](https://pybind11.readthedocs.io/en/latest/advanced/functions.html#allow-prohibiting-none-arguments)
+- [pybind11 - Default Arguments Revisited](https://pybind11.readthedocs.io/en/latest/advanced/functions.html#default-arguments-revisited)

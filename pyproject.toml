@@ -13,6 +13,7 @@ authors = [{name = "Ryan Walters", email = "ryan@walters.to"}]
 test = ["pytest"]
 
 [tool.scikit-build]
+build-dir = "build/{wheel_tag}"
 cmake.build-type = "Release"
 # cmake.verbose = true
 # logging.level = "DEBUG"

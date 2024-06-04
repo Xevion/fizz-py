@@ -27,4 +27,16 @@ pybind11_add_module(fizzpy main.cpp)
 
 target_link_libraries(fizzpy PRIVATE fizz::fizz)
 
+# add_custom_target(stub_sleep ALL
+#   COMMAND "sleep" "90"
+#   DEPENDS fizzpy
+# )
+
+# ${Python_EXECUTABLE} "-m" 
+# add_custom_target(generate_stub ALL
+# COMMAND "pybind11_stubgen" "-o${CMAKE_CURRENT_BINARY_DIR}" "$<TARGET_FILE:fizzpy>"
+#     WORKING_DIRECTORY $<TARGET_FILE_DIR:fizzpy>
+#     DEPENDS fizzpy
+# )
+
 install(TARGETS fizzpy LIBRARY DESTINATION .)
