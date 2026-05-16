@@ -3,7 +3,3 @@
 	url = https://github.com/pybind/pybind11
 	branch = stable
 
-[submodule "vcpkg"]
-	path = vcpkg
-	url = https://github.com/microsoft/vcpkg
-	branch = master
