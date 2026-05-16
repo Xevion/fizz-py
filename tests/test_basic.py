@@ -1,36 +1,64 @@
+"""Unit tests that need no network: URL parsing and low-level Fizz config."""
+
 import pytest
+
 import fizzpy
+from fizzpy import _core
+from fizzpy._common import parse_url
 
 
-@pytest.fixture
-def client():
-    return fizzpy.FizzClientContext()
+class TestParseUrl:
+    def test_https_defaults_to_443(self):
+        target = parse_url("https://example.com/path?q=1")
+        assert target.host == "example.com"
+        assert target.port == 443
+        assert target.path == "/path?q=1"
+
+    def test_explicit_port(self):
+        assert parse_url("https://example.com:8443/").port == 8443
+
+    def test_empty_path_becomes_root(self):
+        assert parse_url("https://example.com").path == "/"
+
+    def test_http_is_rejected(self):
+        with pytest.raises(ValueError):
+            parse_url("http://example.com")
+
+    def test_missing_host_is_rejected(self):
+        with pytest.raises(ValueError):
+            parse_url("https:///path")
 
 
-def test_versions(client):
-    client.setSupportedVersions([fizzpy.ProtocolVersion.tls_1_0])
-    assert client.getSupportedVersions() == [fizzpy.ProtocolVersion.tls_1_0]
+class TestFizzClientContext:
+    @pytest.fixture
+    def ctx(self):
+        return _core.FizzClientContext()
 
-def test_ciphers(client):
-    client.setSupportedCiphers([fizzpy.CipherSuite.TLS_AES_128_GCM_SHA256])
-    assert client.getSupportedCiphers() == [fizzpy.CipherSuite.TLS_AES_128_GCM_SHA256]
+    def test_versions_roundtrip(self, ctx):
+        ctx.setSupportedVersions([_core.ProtocolVersion.tls_1_3])
+        assert ctx.getSupportedVersions() == [_core.ProtocolVersion.tls_1_3]
 
+    def test_ciphers_roundtrip(self, ctx):
+        ctx.setSupportedCiphers([_core.CipherSuite.TLS_AES_128_GCM_SHA256])
+        assert ctx.getSupportedCiphers() == [_core.CipherSuite.TLS_AES_128_GCM_SHA256]
 
-def test_sig_schemes(client):
-    pass
-
-
-def test_supported_groups(client):
-    pass
-
-
-def test_shares(client):
-    pass
+    def test_alpns_roundtrip(self, ctx):
+        ctx.setSupportedAlpns(["h2", "http/1.1"])
+        assert ctx.getSupportedAlpns() == ["h2", "http/1.1"]
 
 
-def test_supported_psk_modes(client):
-    pass
+class TestNamedGroups:
+    def test_classical_groups_present(self):
+        assert _core.NamedGroup.x25519 is not None
+        assert _core.NamedGroup.secp256r1 is not None
+
+    def test_post_quantum_group_present(self):
+        # The standardized hybrid ML-KEM group (codepoint 4588) is the
+        # project's differentiator; it must be exposed even though enabling
+        # the key exchange needs a liboqs-linked Fizz build.
+        assert int(_core.NamedGroup.x25519_mlkem768.value) == 4588
 
 
-def test_supported_alpns(client):
-    pass
+def test_public_api_surface():
+    for name in ("Client", "get", "post", "request", "Response"):
+        assert hasattr(fizzpy, name)
