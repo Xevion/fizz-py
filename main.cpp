@@ -11,6 +11,10 @@
 #include <folly/io/IOBuf.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
+#include <folly/ssl/OpenSSLPtrTypes.h>
+
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include <deque>
 #include <memory>
@@ -41,6 +45,73 @@ struct Promise {
 py::object makeError(const std::string& msg) {
   return py::module_::import("builtins").attr("ConnectionError")(msg);
 }
+
+// Wraps a chain verifier (e.g. DefaultCertificateVerifier) and adds the
+// hostname/SAN matching that Fizz's verifiers deliberately omit. Chain validity
+// is checked first; only then is the leaf certificate matched against the host
+// the caller intended to reach, via OpenSSL's X509_check_host (which honours
+// subjectAltName, wildcards, and CN fallback).
+class HostnameVerifier : public fizz::CertificateVerifier {
+ public:
+  HostnameVerifier(
+      std::shared_ptr<const fizz::CertificateVerifier> chain,
+      std::string host)
+      : chain_(std::move(chain)), host_(std::move(host)) {}
+
+  fizz::Status verify(
+      std::shared_ptr<const fizz::Cert>& ret,
+      fizz::Error& err,
+      const std::vector<std::shared_ptr<const fizz::PeerCert>>& certs)
+      const override {
+    FIZZ_RETURN_ON_ERROR(chain_->verify(ret, err, certs));
+
+    if (certs.empty()) {
+      return err.error(
+          "no peer certificate to match against hostname",
+          fizz::AlertDescription::bad_certificate,
+          fizz::Error::Category::Verifier);
+    }
+    auto der = certs.front()->getDER();
+    if (!der) {
+      return err.error(
+          "peer certificate has no DER encoding for hostname check",
+          fizz::AlertDescription::bad_certificate,
+          fizz::Error::Category::Verifier);
+    }
+
+    const auto* p = reinterpret_cast<const unsigned char*>(der->data());
+    folly::ssl::X509UniquePtr x509(
+        d2i_X509(nullptr, &p, static_cast<long>(der->size())));
+    if (!x509) {
+      return err.error(
+          "could not parse peer certificate",
+          fizz::AlertDescription::bad_certificate,
+          fizz::Error::Category::Verifier);
+    }
+
+    int rc = X509_check_host(x509.get(), host_.c_str(), host_.size(), 0, nullptr);
+    if (rc != 1 && X509_check_ip_asc(x509.get(), host_.c_str(), 0) == 1) {
+      rc = 1;
+    }
+    if (rc != 1) {
+      return err.error(
+          std::string("certificate does not match hostname '") + host_ + "'",
+          fizz::AlertDescription::bad_certificate,
+          fizz::Error::Category::Verifier);
+    }
+    return fizz::Status::Success;
+  }
+
+  fizz::Status getCertificateRequestExtensions(
+      std::vector<fizz::Extension>& ret,
+      fizz::Error& err) const override {
+    return chain_->getCertificateRequestExtensions(ret, err);
+  }
+
+ private:
+  std::shared_ptr<const fizz::CertificateVerifier> chain_;
+  std::string host_;
+};
 
 } // namespace
 
@@ -81,20 +152,26 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
       uint16_t port,
       const std::string& sni,
       std::vector<std::string> alpns,
+      std::vector<fizz::NamedGroup> groups,
       bool verify,
+      const std::string& caFile,
       uint32_t timeoutMs,
       py::function resolve,
       py::function reject) {
     auto promise = std::make_shared<Promise>(
         Promise{std::move(resolve), std::move(reject)});
     auto alpnsPtr = std::make_shared<std::vector<std::string>>(std::move(alpns));
+    auto groupsPtr =
+        std::make_shared<std::vector<fizz::NamedGroup>>(std::move(groups));
 
     evb_->runInEventBaseThread([this,
                                 host,
                                 port,
                                 sni,
                                 alpnsPtr,
+                                groupsPtr,
                                 verify,
+                                caFile,
                                 timeoutMs,
                                 promise]() mutable {
       try {
@@ -102,18 +179,28 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
         if (!alpnsPtr->empty()) {
           ctx->setSupportedAlpns(*alpnsPtr);
         }
+        if (!groupsPtr->empty()) {
+          // Restrict both the advertised groups and the key shares we actually
+          // send, so a caller can force a specific (e.g. post-quantum) share.
+          ctx->setSupportedGroups(*groupsPtr);
+          ctx->setDefaultShares(*groupsPtr);
+        }
 
         std::shared_ptr<const fizz::CertificateVerifier> verifier;
         if (verify) {
           fizz::Error err;
           std::unique_ptr<fizz::DefaultCertificateVerifier> v;
-          auto st = fizz::DefaultCertificateVerifier::create(
-              v, err, fizz::VerificationContext::Client, nullptr);
+          auto st = caFile.empty()
+              ? fizz::DefaultCertificateVerifier::create(
+                    v, err, fizz::VerificationContext::Client, nullptr)
+              : fizz::DefaultCertificateVerifier::createFromCAFile(
+                    v, err, fizz::VerificationContext::Client, caFile);
           if (st != fizz::Status::Success || !v) {
             rejectOnLoop(promise, "failed to build certificate verifier");
             return;
           }
-          verifier = std::move(v);
+          std::shared_ptr<const fizz::CertificateVerifier> chain = std::move(v);
+          verifier = std::make_shared<HostnameVerifier>(chain, sni);
         } else {
           verifier = std::make_shared<fizz::InsecureAcceptAnyCertificate>();
         }
@@ -440,7 +527,9 @@ PYBIND11_MODULE(_core, m) {
           py::arg("port"),
           py::arg("sni"),
           py::arg("alpns"),
+          py::arg("groups"),
           py::arg("verify"),
+          py::arg("ca_file"),
           py::arg("timeout_ms"),
           py::arg("resolve"),
           py::arg("reject"))

@@ -29,6 +29,29 @@ def test_negotiated_tls_parameters():
     assert tls["cipher"].startswith("TLS_")
 
 
+def test_post_quantum_negotiated_by_default():
+    # Against a server that supports it (Cloudflare), the default config must
+    # negotiate the standardized hybrid ML-KEM group (codepoint 4588).
+    r = fizzpy.get("https://www.cloudflare.com")
+    assert r.status_code == 200
+    assert r.tls["group"] == "X25519MLKEM768"
+    assert r.tls["group_code"] == 4588
+
+
+def test_forcing_post_quantum_group():
+    c = fizzpy.Client(groups=[fizzpy.NamedGroup.x25519_mlkem768])
+    r = c.get("https://www.google.com")
+    assert r.status_code == 200
+    assert r.tls["group_code"] == 4588
+
+
+def test_classical_group_still_works():
+    c = fizzpy.Client(groups=[fizzpy.NamedGroup.x25519])
+    r = c.get("https://www.cloudflare.com")
+    assert r.status_code == 200
+    assert r.tls["group"] == "x25519"
+
+
 def test_async_concurrent_requests():
     async def main():
         async with AsyncClient() as client:

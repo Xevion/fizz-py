@@ -19,7 +19,14 @@ from __future__ import annotations
 from typing import Mapping, Optional
 
 from . import _core
-from ._common import DEFAULT_ALPN, DEFAULT_TIMEOUT_MS, READ_DONE, parse_url
+from ._common import (
+    DEFAULT_ALPN,
+    DEFAULT_GROUPS,
+    DEFAULT_TIMEOUT_MS,
+    READ_DONE,
+    parse_url,
+)
+from ._core import NamedGroup
 from ._http import Headers, Response, ResponseParser, build_request
 from ._transport import run_sync
 
@@ -27,6 +34,7 @@ __all__ = [
     "Client",
     "Response",
     "Headers",
+    "NamedGroup",
     "request",
     "get",
     "post",
@@ -52,12 +60,16 @@ class Client:
         self,
         *,
         verify: bool = True,
+        cafile: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: Optional[list[str]] = None,
+        groups: Optional[list] = None,
     ) -> None:
         self._verify = verify
+        self._cafile = cafile or ""
         self._timeout_ms = int(timeout * 1000)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
+        self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
 
     def request(
         self,
@@ -76,7 +88,9 @@ class Client:
                     target.port,
                     target.host,
                     self._alpn,
+                    self._groups,
                     self._verify,
+                    self._cafile,
                     self._timeout_ms,
                     resolve,
                     reject,
@@ -135,8 +149,11 @@ class Client:
 def request(method: str, url: str, **kwargs) -> Response:
     """One-shot request with a throwaway :class:`Client`."""
     verify = kwargs.pop("verify", True)
+    cafile = kwargs.pop("cafile", None)
     timeout = kwargs.pop("timeout", DEFAULT_TIMEOUT_MS / 1000)
-    return Client(verify=verify, timeout=timeout).request(method, url, **kwargs)
+    return Client(verify=verify, cafile=cafile, timeout=timeout).request(
+        method, url, **kwargs
+    )
 
 
 def get(url: str, **kwargs) -> Response:

@@ -54,9 +54,15 @@ class TestNamedGroups:
 
     def test_post_quantum_group_present(self):
         # The standardized hybrid ML-KEM group (codepoint 4588) is the
-        # project's differentiator; it must be exposed even though enabling
-        # the key exchange needs a liboqs-linked Fizz build.
+        # project's differentiator.
         assert int(_core.NamedGroup.x25519_mlkem768.value) == 4588
+
+
+def test_default_groups_lead_with_post_quantum():
+    from fizzpy._common import DEFAULT_GROUPS
+
+    assert DEFAULT_GROUPS[0] == _core.NamedGroup.x25519_mlkem768
+    assert _core.NamedGroup.x25519 in DEFAULT_GROUPS
 
 
 def test_public_api_surface():

@@ -20,7 +20,13 @@ from __future__ import annotations
 from typing import Mapping, Optional
 
 from . import _core
-from ._common import DEFAULT_ALPN, DEFAULT_TIMEOUT_MS, READ_DONE, parse_url
+from ._common import (
+    DEFAULT_ALPN,
+    DEFAULT_GROUPS,
+    DEFAULT_TIMEOUT_MS,
+    READ_DONE,
+    parse_url,
+)
 from ._http import Response, ResponseParser, build_request
 from ._transport import run_async
 
@@ -34,12 +40,16 @@ class AsyncClient:
         self,
         *,
         verify: bool = True,
+        cafile: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: Optional[list[str]] = None,
+        groups: Optional[list] = None,
     ) -> None:
         self._verify = verify
+        self._cafile = cafile or ""
         self._timeout_ms = int(timeout * 1000)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
+        self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
 
     async def request(
         self,
@@ -58,7 +68,9 @@ class AsyncClient:
                     target.port,
                     target.host,
                     self._alpn,
+                    self._groups,
                     self._verify,
+                    self._cafile,
                     self._timeout_ms,
                     resolve,
                     reject,

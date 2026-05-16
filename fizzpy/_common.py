@@ -5,9 +5,16 @@ from __future__ import annotations
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
+from . import _core
+
 DEFAULT_ALPN = ["http/1.1"]
 DEFAULT_TIMEOUT_MS = 30_000
 READ_DONE = b""
+
+# Offer the standardized post-quantum hybrid group first, with classical x25519
+# as fallback — mirroring how Chrome/Firefox send both key shares by default.
+# A server without ML-KEM support simply selects x25519 from our shares.
+DEFAULT_GROUPS = [_core.NamedGroup.x25519_mlkem768, _core.NamedGroup.x25519]
 
 
 class Target(NamedTuple):
