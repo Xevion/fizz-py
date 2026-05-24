@@ -10,8 +10,8 @@ EventBase thread.
     print(r.status_code, r.headers["content-type"])
     print(r.tls)  # negotiated TLS 1.3 parameters
 
-Certificate chains are verified against the system trust store by default.
-Note: hostname (SAN) verification is not yet performed — see README.
+Certificate chains are verified against the system trust store and the
+hostname is checked against the certificate's SAN by default.
 """
 
 from __future__ import annotations

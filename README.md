@@ -1,86 +1,94 @@
 # fizzpy
 
-Python bindings for using the C++ TLS 1.3 library ['Fizz'](https://github.com/facebookincubator/fizz)
+A small TLS 1.3 HTTP client for Python, built on Facebook's
+[Fizz](https://github.com/facebookincubator/fizz) (C++) via pybind11.
 
-## Support Details
+By default it offers a **post-quantum key exchange** — the standardized hybrid
+`X25519MLKEM768` group (codepoint 4588). An ordinary `GET` negotiates a hybrid
+ML-KEM handshake against servers that support it (Cloudflare, Google) and falls
+back to classical X25519 against those that don't.
 
-`fizzpy` is made with the following targets in mind:
+> TLS 1.3 only, HTTP/1.1 only. This is a focused toolkit / learning project,
+> not a drop-in `requests` replacement. See [Status](#status).
 
-- x64 Linux, Intel MacOS, x64 Windows
-- Python 3.10
-- cmake 3.22.1
+## Usage
 
-## Setup
+Synchronous:
 
-```bash
-git clone https://github.com/Xevion/fizz-py --recursive
-cd fizz-py
-git submodule update --init --recursive # Ensure submodules are available (if you forgot to clone recursively)
-./vcpkg/bootstrap-vcpkg.sh
-./vcpkg/vcpkg install
-./generate.sh
+```python
+import fizzpy
+
+r = fizzpy.get("https://www.cloudflare.com")
+print(r.status_code)               # 200
+print(r.headers["content-type"])   # text/html; charset=UTF-8
+print(r.text[:64])
+
+# The negotiated TLS 1.3 parameters are attached to every response:
+print(r.tls)
+# {'version': 'TLSv1.3', 'cipher': 'TLS_AES_128_GCM_SHA256',
+#  'group': 'X25519MLKEM768', 'group_code': 4588,
+#  'alpn': 'http/1.1', 'sni': 'www.cloudflare.com', 'peer_cert': '...'}
 ```
 
-`VCPKG_ROOT` is usually used as an environment variable, but it's not stable in my experience. Directly setting the `CMAKE_TOOLCHAIN_FILE` is more reliable.
+Asynchronous (the same C++ core, resolved on the running event loop):
 
-## TODO
+```python
+import asyncio
+from fizzpy.aio import AsyncClient
 
-- [ ] Send an actual request
-- [ ] Explore async bindings
-- [ ] Find lowest working Python version
-- [ ] Implement CI/CD pytest invocations
-- [ ] Test various Python architectures
-- [ ] Revisit `cibuildwheel`, open issues on current issues
-  - Manual workflow invocation to lower costs while testing
+async def main():
+    async with AsyncClient() as client:
+        r = await client.get("https://www.google.com")
+        print(r.status_code, r.tls["group"], r.tls["group_code"])
 
-## Requirements
+asyncio.run(main())
+```
 
-- [ ] `-host` / `-port` Large-scale C++ class handling. Unknown difficulty.
-- [ ] `-verify` Pure C++ handler. Unknown difficulty.
-- [ ] `-cert` (Requires -key) Small C++ handler using `openssl::CertUtils::makeSelfCert` with `FizzClientContext::setClientCertificate`.
-- [ ] `-key` See `-cert` for details.
-- [ ] `-pass` See `-cert` for details (password for the \[private] key).
-- [ ] `-capath` Medium difficulty. Pure C++, all TLS implementation. May be workable, may be difficult.
-- [ ] `-keylog` High difficulty. Pure C++ due to performance implications. Largely tied up with Connection handling, core part of TLS.
-- [ ] `-servername` Easy, handled by the `Connection` class.
-- [ ] `-alpn` Easy; part of `FizzClientContext::setSupportedVersions`.
-- [ ] `-certcompression` Unknown difficulty. Pure C++ due to performance implications, supported by custom handler.
-- [ ] `-early` Easy, part of `FizzClientContext`.
-- [ ] `-httpproxy` Medium/unknown difficulty, pure C++, but handled by the `Connection` class.
-- [ ] `-ciphers` Easy, provided by`FizzClientContext::setSupportedCiphers`.
-- [ ] `-sigschemes` Easy, provided by `FizzClientContext::setSupportedSigSchemes`.
-- [ ] `-curves` Easy, provided by `FizzClientContext::setSupportedGroups`.
-- [ ] `-delegatedcred` Medium difficulty. Pure C++, but mostly handled by `FizzClientContext`.
+### Choosing the key exchange
 
-### Fizz Reference Files
+The default offers `[x25519_mlkem768, x25519]`, mirroring how Chrome and Firefox
+send both key shares. Override it per client:
 
-- [FizzClientContext.h](https://github.com/facebookincubator/fizz/blob/main/fizz/client/FizzClientContext.h) The primary object containing most of the settable client TLS options.
-- [FizzClientCommand.cpp](https://github.com/facebookincubator/fizz/blob/main/fizz/tool/FizzClientCommand.cpp) A CLI tool for sending requests in a demo context. This is the primary inspiration for the project's usage.
-- [fizz/record/Types.h](https://github.com/facebookincubator/fizz/blob/main/fizz/record/Types.h) Contains many of the special enums and the values used for TLS options on the client.
-- [FizzServerCommand.cpp](https://github.com/facebookincubator/fizz/blob/main/fizz/tool/FizzServerCommand.cpp) A CLI tool for receiving requests in a demo context. This isn't necessary for development of the bindings, but it's a useful reference.
+```python
+import fizzpy
+from fizzpy import NamedGroup
 
-### Reference Material
+# Force post-quantum only (handshake fails if the server lacks ML-KEM):
+pq = fizzpy.Client(groups=[NamedGroup.x25519_mlkem768])
 
-Repositories, files, GitHub Actions, workflows or any reference I found useful in creating this project.
+# Classical only:
+classical = fizzpy.Client(groups=[NamedGroup.x25519])
+```
 
-- [RainbowRobotics/rbpodo](https://github.com/RainbowRobotics/rbpodo)
-  - [python/CMakeLists.txt](https://github.com/RainbowRobotics/rbpodo/blob/main/python/CMakeLists.txt) [pyproject.toml](https://github.com/RainbowRobotics/rbpodo/blob/main/pyproject.toml) [build-and-test.yml](https://github.com/RainbowRobotics/rbpodo/blob/main/.github/workflows/build-and-test.yml)
-  - Cmake11, non-virtualized (cibuildwheel) matrix builds, Pybind11, C++ and Python first-class bindings
-- [pybind/scikit_build_example](https://github.com/pybind/scikit_build_example)
-  - [CMakeLists.txt](https://github.com/pybind/scikit_build_example/blob/master/CMakeLists.txt)
-  - [.github/workflows/wheels.yml](https://github.com/pybind/scikit_build_example/blob/master/.github/workflows/wheels.yml)
-  - [pyproject.toml](https://github.com/pybind/scikit_build_example/blob/master/pyproject.toml)
-- [cibuildwheel - docs](https://cibuildwheel.pypa.io/en/stable/)
-- [vcpkg.link - fizz](https://vcpkg.link/ports/fizz)
-- [vcpkg.link - libsodium](https://vcpkg.link/ports/libsodium)
-- [Homebrew/homebrew-core/Formula/f/fizz.rb](https://github.com/Homebrew/homebrew-core/blob/c1534daa2f467d9924d02333fd0aed8dbf17f465/Formula/f/fizz.rb#L60)
-- [pybind/cmake_example](https://github.com/pybind/cmake_example/tree/master)
-- [lukka/run-cmake](https://github.com/lukka/run-cmake)
-- [lukka/run-cmake](https://github.com/lukka/get-cmake)
-- [caiorss/example-pybind11-vcpkg](https://github.com/caiorss/example-pybind11-vcpkg)
-- [bloomberg/memray/.github/workflows/build_wheels.yml](https://github.com/bloomberg/memray/blob/main/.github/workflows/build_wheels.yml)
-- [actions/setup-python](https://github.com/actions/setup-python)
-- [CMake `add_custom_target`](https://cmake.org/cmake/help/latest/command/add_custom_target.html)
-- [pybind11 - Avoiding C++ types in docstrings](https://pybind11.readthedocs.io/en/latest/advanced/misc.html#avoiding-cpp-types-in-docstrings)
-- [pybind11 - Allow/Prohibit None Types](https://pybind11.readthedocs.io/en/latest/advanced/functions.html#allow-prohibiting-none-arguments)
-- [pybind11 - Default Arguments Revisited](https://pybind11.readthedocs.io/en/latest/advanced/functions.html#default-arguments-revisited)
+### Certificate verification
+
+Certificate chains are verified against the system trust store and the
+hostname is checked against the certificate's SAN by default. Point at a custom
+CA, or disable verification entirely:
+
+```python
+fizzpy.Client(cafile="/path/to/ca.pem")   # trust a specific CA
+fizzpy.Client(verify=False)               # accept any certificate (insecure)
+```
+
+## Status
+
+What works today:
+
+- TLS 1.3 handshake with classical or post-quantum (ML-KEM) key exchange
+- `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
+- HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
+- Chain + hostname certificate verification, custom CA trust
+
+Current limitations:
+
+- **TLS 1.3 only** (a Fizz constraint) — it cannot talk to TLS 1.2-only servers
+- HTTP/1.1 only (no HTTP/2)
+- One connection per request — no keep-alive yet
+- No automatic redirect following yet
+
+## Building
+
+There are no prebuilt wheels yet; the post-quantum handshake requires a Fizz
+built against [liboqs](https://github.com/open-quantum-safe/liboqs). See
+[BUILDING.md](BUILDING.md) for the from-source recipe.
