@@ -34,11 +34,30 @@ folly::EventBase* sharedEvb() {
 }
 
 // Holds the resolve/reject pair for one pending async op. py::function refcounts
-// are only ever touched while the GIL is held — callers MUST hold the GIL when
-// constructing, calling, moving-from, or destroying a live pair.
+// are only ever touched while the GIL is held. The subtle case is destruction:
+// a pending op's last shared_ptr reference is often dropped on the EventBase
+// thread (when a queued lambda is destroyed after running), which has no GIL.
+// The destructor therefore acquires the GIL before releasing the callables.
+// gil_scoped_acquire is reentrant, so paths that resolve/reject while already
+// holding the GIL (and null the members first) cost nothing here.
 struct Promise {
   py::function resolve;
   py::function reject;
+
+  Promise(py::function res, py::function rej)
+      : resolve(std::move(res)), reject(std::move(rej)) {}
+  Promise(Promise&&) noexcept = default;
+  Promise& operator=(Promise&&) noexcept = default;
+  Promise(const Promise&) = delete;
+  Promise& operator=(const Promise&) = delete;
+
+  ~Promise() {
+    if (resolve.ptr() != nullptr || reject.ptr() != nullptr) {
+      py::gil_scoped_acquire gil;
+      resolve = py::function();
+      reject = py::function();
+    }
+  }
 };
 
 // Build a Python exception object carrying `msg` (GIL must be held).
