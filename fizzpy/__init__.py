@@ -16,6 +16,7 @@ hostname is checked against the certificate's SAN by default.
 
 from __future__ import annotations
 
+import threading
 from typing import Mapping, Optional
 
 from . import _core
@@ -54,11 +55,17 @@ __all__ = [
 TlsParameters = dict
 
 
+class _Stale(Exception):
+    """Internal: a pooled connection was dead; retry once on a fresh one."""
+
+
 class Client:
     """A synchronous TLS HTTP client.
 
-    Each request currently opens a fresh TLS connection and closes it after the
-    response (``Connection: close``); connection reuse is a future enhancement.
+    Idle connections are kept in a per-host pool and reused (HTTP/1.1
+    keep-alive). A pooled connection found dead on reuse is transparently
+    replaced for idempotent retries. Call :meth:`close` (or use the client as a
+    context manager) to close pooled connections.
     """
 
     def __init__(
@@ -79,6 +86,8 @@ class Client:
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
         self._follow_redirects = follow_redirects
         self._max_redirects = max_redirects
+        self._pool: dict[tuple[str, int], list] = {}
+        self._lock = threading.Lock()
 
     def request(
         self,
@@ -120,48 +129,99 @@ class Client:
         body: Optional[bytes] = None,
     ) -> Response:
         target = parse_url(url)
+        key = (target.host, target.port)
+        raw = build_request(
+            method, target.path, target.host, dict(headers) if headers else None, body
+        )
+
+        pooled = self._take(key)
+        if pooled is not None:
+            try:
+                return self._exchange(pooled, key, raw, reused=True)
+            except _Stale:
+                pooled.close()  # dead idle connection; fall through to a fresh one
+
+        return self._exchange(self._connect(target), key, raw, reused=False)
+
+    def _connect(self, target) -> "_core.TlsConnection":
         conn = _core.TlsConnection()
-        try:
-            run_sync(
-                lambda resolve, reject: conn.connect(
-                    target.host,
-                    target.port,
-                    target.host,
-                    self._alpn,
-                    self._groups,
-                    self._verify,
-                    self._cafile,
-                    self._timeout_ms,
-                    resolve,
-                    reject,
-                )
-            )
-
-            raw = build_request(
-                method.upper(),
-                target.path,
+        run_sync(
+            lambda resolve, reject: conn.connect(
                 target.host,
-                dict(headers) if headers else None,
-                body,
+                target.port,
+                target.host,
+                self._alpn,
+                self._groups,
+                self._verify,
+                self._cafile,
+                self._timeout_ms,
+                resolve,
+                reject,
             )
+        )
+        return conn
+
+    def _exchange(self, conn, key, raw: bytes, *, reused: bool) -> Response:
+        try:
             run_sync(lambda resolve, reject: conn.write(raw, resolve, reject))
+        except Exception as exc:
+            # A reused connection that fails before the request lands was closed
+            # by the server while idle — safe to retry on a fresh one.
+            if reused:
+                raise _Stale from exc
+            raise
 
-            parser = ResponseParser()
-            while not parser.is_complete():
-                chunk = run_sync(
-                    lambda resolve, reject: conn.read(resolve, reject)
-                )
-                if chunk == READ_DONE:
-                    parser.feed_eof()
-                    break
-                parser.feed(chunk)
+        parser = ResponseParser()
+        received = False
+        while not parser.is_complete():
+            try:
+                chunk = run_sync(lambda resolve, reject: conn.read(resolve, reject))
+            except Exception as exc:
+                if reused and not received:
+                    raise _Stale from exc
+                raise
+            if chunk == READ_DONE:
+                if reused and not received:
+                    raise _Stale
+                parser.feed_eof()
+                break
+            received = True
+            parser.feed(chunk)
 
-            response = parser.response
-            if response is None:
-                raise ConnectionError("connection closed before a full response")
-            response.tls = conn.negotiated()
-            return response
-        finally:
+        response = parser.response
+        if response is None:
+            if reused:
+                raise _Stale
+            raise ConnectionError("connection closed before a full response")
+        response.tls = conn.negotiated()
+
+        if self._reusable(parser, response):
+            self._give(key, conn)
+        else:
+            conn.close()
+        return response
+
+    @staticmethod
+    def _reusable(parser: ResponseParser, response: Response) -> bool:
+        if parser.used_close_framing or response.http_version != "HTTP/1.1":
+            return False
+        return "close" not in (response.headers.get("Connection") or "").lower()
+
+    def _take(self, key):
+        with self._lock:
+            conns = self._pool.get(key)
+            return conns.pop() if conns else None
+
+    def _give(self, key, conn) -> None:
+        with self._lock:
+            self._pool.setdefault(key, []).append(conn)
+
+    def close(self) -> None:
+        """Close all pooled connections."""
+        with self._lock:
+            pooled = [c for conns in self._pool.values() for c in conns]
+            self._pool.clear()
+        for conn in pooled:
             conn.close()
 
     def get(self, url: str, **kwargs) -> Response:
@@ -183,7 +243,7 @@ class Client:
         return self
 
     def __exit__(self, *exc) -> None:
-        return None
+        self.close()
 
 
 _CLIENT_KWARGS = frozenset(

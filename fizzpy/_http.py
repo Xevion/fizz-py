@@ -222,6 +222,11 @@ class ResponseParser:
     def is_complete(self) -> bool:
         return self._state == _STATE_DONE
 
+    @property
+    def used_close_framing(self) -> bool:
+        """True if the body was delimited by connection close (not reusable)."""
+        return self._read_until_close
+
     def feed(self, data: bytes) -> None:
         """Append ``data`` and parse as far as the buffered bytes allow."""
         if data:
