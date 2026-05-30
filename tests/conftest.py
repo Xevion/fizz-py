@@ -85,6 +85,111 @@ def self_signed_server(tmp_path_factory):
         thread.join(timeout=5)
 
 
+class _CountingServer(_DualStackServer):
+    """Dual-stack server that counts accepted TCP connections.
+
+    With HTTP/1.1 keep-alive, one connection serves many requests, so the
+    connection count (not the request count) is what reveals reuse.
+    """
+
+    connections = 0
+
+    def get_request(self):
+        type(self).connections += 1
+        return super().get_request()
+
+
+def _serve_app(cert: str, key: str):
+    """A persistent (HTTP/1.1) TLS server with redirect + method-echo routes."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _body(self, status: int, payload: bytes, extra=()):
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(payload)))
+            for name, value in extra:
+                self.send_header(name, value)
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+
+        def _consume_request_body(self):
+            length = int(self.headers.get("Content-Length", 0))
+            if length:
+                self.rfile.read(length)
+
+        def _redirect(self, location: str, status: int = 302):
+            self._body(status, b"", extra=[("Location", location)])
+
+        def _route(self):
+            self._consume_request_body()
+            path = self.path
+            if path == "/":
+                self._body(200, BODY)
+            elif path == "/echo-method":
+                self._body(200, self.command.encode())
+            elif path == "/redirect":
+                self._redirect("/")
+            elif path == "/redirect-303":
+                self._redirect("/echo-method", status=303)
+            elif path == "/redirect-307":
+                self._redirect("/echo-method", status=307)
+            elif path == "/loop":
+                self._redirect("/loop")
+            elif path.startswith("/chain/"):
+                n = int(path.rsplit("/", 1)[1])
+                self._redirect("/" if n <= 1 else f"/chain/{n - 1}")
+            else:
+                self._body(404, b"not found")
+
+        do_GET = _route
+        do_POST = _route
+
+        def log_message(self, *args):
+            pass
+
+    port = _free_port()
+    _CountingServer.connections = 0
+    httpd = _CountingServer(("::", port), Handler)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    ctx.load_cert_chain(cert, key)
+    httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, thread, port
+
+
+@pytest.fixture
+def local_server(tmp_path):
+    """Yield a persistent self-signed TLS server (use ``verify=False``).
+
+    Exposes ``.url`` plus a ``.connections`` count of accepted TCP connections,
+    and routes for redirect / method-echo / keep-alive testing.
+    """
+    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
+    _openssl(
+        "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert,
+        "-days", "1", "-nodes", "-subj", "/CN=localhost",
+    )
+    httpd, thread, port = _serve_app(cert, key)
+
+    class Handle:
+        url = f"https://127.0.0.1:{port}/"
+
+        @property
+        def connections(self) -> int:
+            return _CountingServer.connections
+
+    try:
+        yield Handle()
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+
+
 @pytest.fixture
 def ca_server(tmp_path):
     """Factory: ``start(san) -> (url, cafile, body)``.

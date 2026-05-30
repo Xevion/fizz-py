@@ -143,6 +143,9 @@ class Response:
         self.http_version = http_version
         self.headers = headers
         self.content = content
+        # Populated by the client after the transport completes.
+        self.url: str = ""
+        self.tls: dict | None = None
 
     @property
     def text(self) -> str:

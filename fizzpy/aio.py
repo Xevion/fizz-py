@@ -23,9 +23,13 @@ from . import _core
 from ._common import (
     DEFAULT_ALPN,
     DEFAULT_GROUPS,
+    DEFAULT_MAX_REDIRECTS,
     DEFAULT_TIMEOUT_MS,
     READ_DONE,
+    TooManyRedirects,
+    next_redirect,
     parse_url,
+    strip_body_headers,
 )
 from ._http import Response, ResponseParser, build_request
 from ._transport import run_async
@@ -44,14 +48,49 @@ class AsyncClient:
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: Optional[list[str]] = None,
         groups: Optional[list] = None,
+        follow_redirects: bool = True,
+        max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
         self._verify = verify
         self._cafile = cafile or ""
         self._timeout_ms = int(timeout * 1000)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
+        self._follow_redirects = follow_redirects
+        self._max_redirects = max_redirects
 
     async def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Optional[Mapping[str, str]] = None,
+        body: Optional[bytes] = None,
+    ) -> Response:
+        method = method.upper()
+        seen = 0
+        while True:
+            response = await self._perform(method, url, headers=headers, body=body)
+            response.url = url
+            nxt = (
+                next_redirect(
+                    method, url, response.status_code, response.headers.get("Location")
+                )
+                if self._follow_redirects
+                else None
+            )
+            if nxt is None:
+                return response
+            if seen >= self._max_redirects:
+                raise TooManyRedirects(
+                    f"exceeded {self._max_redirects} redirects (last: {url})"
+                )
+            new_method, url = nxt
+            if new_method != method:
+                method, body, headers = new_method, None, strip_body_headers(headers)
+            seen += 1
+
+    async def _perform(
         self,
         method: str,
         url: str,
