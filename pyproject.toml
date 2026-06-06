@@ -19,6 +19,27 @@ build-dir = "build/{wheel_tag}"
 cmake.build-type = "Release"
 wheel.packages = ["fizzpy"]
 
-# vcpkg-based wheel builds set CMAKE_TOOLCHAIN_FILE via the VCPKG_ROOT env var
-# (see CMakeLists.txt). Local development builds against system/Homebrew Fizz
-# and pass -DCMAKE_PREFIX_PATH directly to cmake instead.
+# Local development builds against a system/Homebrew (or getdeps) Fizz and pass
+# -DCMAKE_PREFIX_PATH directly to cmake. See BUILDING.md.
+
+# Portable wheels: build the folly+fizz+liboqs tree once per manylinux container
+# (ci/build_fizz_deps.sh), then compile and link _core against it per Python
+# version. Build deps are installed by before-build so --no-build-isolation can
+# see them. CMAKE_PREFIX_PATH points at the getdeps install dirs plus this
+# interpreter's pybind11; CMAKE_ARGS supplies fizz's bundled find-modules.
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux*"
+build-frontend = { name = "pip", args = ["--no-build-isolation"] }
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+before-all = "bash {project}/ci/build_fizz_deps.sh"
+before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
+
+[tool.cibuildwheel.linux.environment]
+GETDEPS_SCRATCH = "/opt/fizz-deps"
+FIZZPY_BUILD_INFO = "/opt/fizzpy-build"
+CMAKE_PREFIX_PATH = "$(cat /opt/fizzpy-build/prefix.txt);$(pybind11-config --cmakedir)"
+CMAKE_ARGS = "-DFIZZ_CMAKE_MODULE_DIR=$(cat /opt/fizzpy-build/module_dir.txt)"

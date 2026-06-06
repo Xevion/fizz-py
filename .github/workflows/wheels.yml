@@ -1,84 +1,38 @@
-name: Build
+name: Wheels
 
-on: [push, pull_request]
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   build_sdist:
-    name: Build source distribution
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  build_wheels:
+    name: Build manylinux wheels (x86_64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build sdist
-        run: pipx run build --sdist
+      # Builds folly + fizz + liboqs from source inside the manylinux container
+      # (see ci/build_fizz_deps.sh), so the dep tree is heavy: expect ~40 min on
+      # a cold cache. liboqs travels with fizz's getdeps manifest, giving the
+      # shipped wheel real post-quantum (X25519MLKEM768) support.
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v4.1.0
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sdist
-          path: dist
-
-  build_wheels:
-    name: "Wheel: ${{ matrix.os }} for Python ${{ matrix.python }}"
-    needs: [build_sdist]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        python: ['3.10', '3.9', '3.8', '3.7']
-        include:
-          - os: windows-latest
-            python: '3.10'
-          - os: macos-13
-            python: '3.10'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: 'recursive'
-
-      - uses: lukka/get-cmake@main
-        with:
-          useCloudCache: true
-          cmakeVersion: 3.22.1
-
-      - uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgDirectory: ${{ github.workspace}}/vcpkg
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Download Source Distribution
-        uses: actions/download-artifact@v4
-        with:
-          name: sdist
-          path: dist
-
-      - name: Build Wheel
-        run: |
-          pip install build  
-          python -m build --wheel
-
-      # - uses: pypa/cibuildwheel@v2.17
-      #   env:
-      #       CIBW_BEFORE_ALL_LINUX: yum install -y perl-IPC-Cmd zip clang
-      #       CIBW_ARCHS_MACOS: universal2
-      #       CIBW_ARCHS_WINDOWS: auto ARM64
-
-      - name: Prepare Artifact Name
-        id: prepare_artifact_name
-        shell: python
-        run: |
-          import os, glob
-          wheels = glob.glob('dist/*.whl')
-          assert len(wheels) == 1, f"Expected 1 wheel, got {len(wheels)}"
-          with open(os.environ['GITHUB_OUTPUT'], 'w') as f:
-            f.write(f"name={os.path.basename(wheels[0])}\n")
-
-      - name: Upload Wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.prepare_artifact_name.outputs.name }}
-          path: dist/*.whl
+          name: wheels-manylinux-x86_64
+          path: wheelhouse/*.whl
           if-no-files-found: error
