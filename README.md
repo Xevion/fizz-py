@@ -11,6 +11,21 @@ back to classical X25519 against those that don't.
 > TLS 1.3 only, HTTP/1.1 only. This is a focused toolkit / learning project,
 > not a drop-in `requests` replacement. See [Status](#status).
 
+## Install
+
+```sh
+pip install fizzpy
+```
+
+The Linux wheels are self-contained: folly, Fizz, and liboqs are statically
+linked into the extension, so a fresh `pip install` has working post-quantum
+TLS with no system packages to add. `certifi` (pulled in automatically) supplies
+the default trust store.
+
+Wheels are produced by CI (`manylinux_2_28`, x86_64, CPython 3.10–3.14); if one
+isn't available for your platform yet, build from source — see
+[BUILDING.md](BUILDING.md).
+
 ## Usage
 
 Synchronous:
@@ -62,9 +77,9 @@ classical = fizzpy.Client(groups=[NamedGroup.x25519])
 
 ### Certificate verification
 
-Certificate chains are verified against the system trust store and the
-hostname is checked against the certificate's SAN by default. Point at a custom
-CA, or disable verification entirely:
+Certificate chains are verified against the [certifi](https://github.com/certifi/python-certifi)
+CA bundle and the hostname is checked against the certificate's SAN by default.
+Point at a custom CA, or disable verification entirely:
 
 ```python
 fizzpy.Client(cafile="/path/to/ca.pem")   # trust a specific CA
@@ -78,17 +93,17 @@ What works today:
 - TLS 1.3 handshake with classical or post-quantum (ML-KEM) key exchange
 - `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
 - HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
-- Chain + hostname certificate verification, custom CA trust
+- Connection keep-alive with a per-host pool; automatic redirect following
+- Chain + hostname certificate verification, certifi default + custom CA trust
 
 Current limitations:
 
 - **TLS 1.3 only** (a Fizz constraint) — it cannot talk to TLS 1.2-only servers
 - HTTP/1.1 only (no HTTP/2)
-- One connection per request — no keep-alive yet
-- No automatic redirect following yet
 
 ## Building
 
-There are no prebuilt wheels yet; the post-quantum handshake requires a Fizz
-built against [liboqs](https://github.com/open-quantum-safe/liboqs). See
-[BUILDING.md](BUILDING.md) for the from-source recipe.
+The post-quantum handshake requires a Fizz built against
+[liboqs](https://github.com/open-quantum-safe/liboqs). The CI wheels build the
+whole folly + Fizz + liboqs tree from source inside `manylinux_2_28`; see
+[BUILDING.md](BUILDING.md) for that recipe and for local development builds.
