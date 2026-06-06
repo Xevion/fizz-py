@@ -27,6 +27,7 @@ from ._common import (
     DEFAULT_TIMEOUT_MS,
     READ_DONE,
     TooManyRedirects,
+    default_ca_file,
     next_redirect,
     parse_url,
     strip_body_headers,
@@ -80,7 +81,7 @@ class Client:
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
         self._verify = verify
-        self._cafile = cafile or ""
+        self._cafile = cafile or default_ca_file()
         self._timeout_ms = int(timeout * 1000)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)

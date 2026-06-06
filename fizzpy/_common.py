@@ -12,6 +12,23 @@ DEFAULT_TIMEOUT_MS = 30_000
 DEFAULT_MAX_REDIRECTS = 10
 READ_DONE = b""
 
+
+def default_ca_file() -> str:
+    """Path to the CA bundle used when a caller doesn't supply one.
+
+    The extension bundles its own OpenSSL, whose compiled-in trust-store path
+    doesn't exist on most hosts (and not at all in minimal images), so the
+    OpenSSL default verifies nothing out of the box. certifi gives every
+    install the Mozilla root set with no system setup. If certifi is somehow
+    unavailable we return "" and fall back to OpenSSL's default store.
+    """
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        return ""
+
 # Status codes that carry a Location and request a follow-up request.
 REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
