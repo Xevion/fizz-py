@@ -13,6 +13,11 @@ dependencies = ["certifi"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+dev = ["pytest", "ruff", "scikit-build-core", "pybind11", "pybind11-stubgen"]
+
+[tool.ruff]
+# Vendored submodule and build/dev artifacts carry their own (or no) style.
+extend-exclude = ["pybind11", ".dev", "build", "dist"]
 
 [tool.scikit-build]
 build-dir = "build/{wheel_tag}"
@@ -23,7 +28,7 @@ wheel.packages = ["fizzpy"]
 # -DCMAKE_PREFIX_PATH directly to cmake. See BUILDING.md.
 
 # Portable wheels: build the folly+fizz+liboqs tree once per manylinux container
-# (ci/build_fizz_deps.sh), then compile and link _core against it per Python
+# (ci/build_fizz_deps.py), then compile and link _core against it per Python
 # version. Build deps are installed by before-build so --no-build-isolation can
 # see them. CMAKE_PREFIX_PATH points at the getdeps install dirs plus this
 # interpreter's pybind11; CMAKE_ARGS supplies fizz's bundled find-modules.
@@ -35,7 +40,7 @@ build-frontend = { name = "pip", args = ["--no-build-isolation"] }
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
 manylinux-x86_64-image = "manylinux_2_28"
-before-all = "bash {project}/ci/build_fizz_deps.sh"
+before-all = "python {project}/ci/build_fizz_deps.py"
 before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 
 [tool.cibuildwheel.linux.environment]
