@@ -42,6 +42,67 @@ class TooManyRedirects(Exception):
 DEFAULT_GROUPS = [_core.NamedGroup.x25519_mlkem768, _core.NamedGroup.x25519]
 
 
+class Extension(NamedTuple):
+    """A custom TLS ClientHello extension: a type code and its opaque payload."""
+
+    type: int
+    data: bytes
+
+
+# Extension types Fizz assembles into the ClientHello itself (from
+# fizz/record/Types.h and the ClientHello build in ClientProtocol.cpp). Injecting
+# any of these would duplicate or contradict Fizz's own, so they're refused.
+FIZZ_MANAGED_EXTENSIONS = frozenset(
+    {
+        0,  # server_name
+        10,  # supported_groups
+        13,  # signature_algorithms
+        16,  # application_layer_protocol_negotiation
+        41,  # pre_shared_key
+        42,  # early_data
+        43,  # supported_versions
+        44,  # cookie
+        45,  # psk_key_exchange_modes
+        47,  # certificate_authorities
+        50,  # signature_algorithms_cert
+        51,  # key_share
+        0xFE0D,  # encrypted_client_hello
+    }
+)
+
+
+def normalize_extensions(extensions) -> list[tuple[int, bytes]]:
+    """Validate and coerce caller extensions to ``list[(int, bytes)]``.
+
+    Accepts any iterable of ``(type, data)`` pairs (e.g. :class:`Extension`).
+    Raises ``ValueError`` for an out-of-range type, oversized data, a Fizz-managed
+    type, or a duplicate type — naming the offender.
+    """
+    if not extensions:
+        return []
+    out: list[tuple[int, bytes]] = []
+    seen: set[int] = set()
+    for item in extensions:
+        etype, data = item
+        etype = int(etype)
+        if not 0 <= etype <= 0xFFFF:
+            raise ValueError(f"extension type {etype} out of range 0..65535")
+        data = bytes(data)
+        if len(data) > 0xFFFF:
+            raise ValueError(
+                f"extension {etype} data is {len(data)} bytes; max is 65535"
+            )
+        if etype in FIZZ_MANAGED_EXTENSIONS:
+            raise ValueError(
+                f"extension type {etype} is managed by Fizz and cannot be injected"
+            )
+        if etype in seen:
+            raise ValueError(f"duplicate extension type {etype}")
+        seen.add(etype)
+        out.append((etype, data))
+    return out
+
+
 class Target(NamedTuple):
     """A parsed request target: where to connect and what to ask for."""
 

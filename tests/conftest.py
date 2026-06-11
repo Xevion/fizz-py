@@ -68,6 +68,62 @@ def _openssl(*args: str) -> None:
     subprocess.run(["openssl", *args], check=True, capture_output=True)
 
 
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    """Read exactly ``n`` bytes, or fewer if the peer closes first."""
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            break
+        buf += chunk
+    return buf
+
+
+@pytest.fixture
+def raw_clienthello_server():
+    """A plain-socket listener that captures the first TLS record, then closes.
+
+    No TLS is spoken: the worker reads one ``handshake(22)`` record (the
+    ClientHello) off the wire, stashes its body, and drops the connection so the
+    client's handshake fails. Lets a test inspect exactly what fizzpy sent
+    without completing a handshake. Exposes ``.url`` and ``.clienthello``.
+    """
+    port = _free_port()
+    srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("::", port))
+    srv.listen(1)
+    captured = {}
+
+    def serve():
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            return
+        with conn:
+            header = _recv_exact(conn, 5)
+            if len(header) == 5 and header[0] == 0x16:  # handshake record
+                length = int.from_bytes(header[3:5], "big")
+                captured["record"] = _recv_exact(conn, length)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+
+    class Handle:
+        url = f"https://127.0.0.1:{port}/"
+
+        @property
+        def clienthello(self):
+            return captured.get("record")
+
+    try:
+        yield Handle()
+    finally:
+        srv.close()
+        thread.join(timeout=5)
+
+
 @pytest.fixture(scope="session")
 def self_signed_server(tmp_path_factory):
     """Yield ``(url, body)`` for a server using an untrusted self-signed cert."""

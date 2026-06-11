@@ -29,6 +29,7 @@ from ._common import (
     TooManyRedirects,
     default_ca_file,
     next_redirect,
+    normalize_extensions,
     parse_url,
     strip_body_headers,
 )
@@ -59,6 +60,7 @@ class AsyncClient:
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: Optional[list[str]] = None,
         groups: Optional[list] = None,
+        extensions: Optional[list] = None,
         follow_redirects: bool = True,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
@@ -67,6 +69,7 @@ class AsyncClient:
         self._timeout_ms = int(timeout * 1000)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
+        self._extensions = normalize_extensions(extensions)
         self._follow_redirects = follow_redirects
         self._max_redirects = max_redirects
         self._pool: dict[tuple[str, int], list] = {}
@@ -137,6 +140,7 @@ class AsyncClient:
                 self._verify,
                 self._cafile,
                 self._timeout_ms,
+                self._extensions,
                 resolve,
                 reject,
             )

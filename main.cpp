@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 
 #include <fizz/client/AsyncFizzClient.h>
+#include <fizz/client/ClientExtensions.h>
 #include <fizz/client/FizzClientContext.h>
 #include <fizz/protocol/DefaultCertificateVerifier.h>
 #include <fizz/tool/CertificateVerifiers.h>
@@ -132,6 +133,35 @@ class HostnameVerifier : public fizz::CertificateVerifier {
   std::string host_;
 };
 
+// Appends caller-supplied extensions to every ClientHello (including the second
+// one after a HelloRetryRequest). The extensions are marshalled from Python into
+// plain bytes at the call boundary, so nothing here touches Python or the GIL.
+// onEncryptedExtensions is a no-op for now — the read side is a documented hook
+// for surfacing the server's EncryptedExtensions to Python later.
+class PyClientExtensions : public fizz::ClientExtensions {
+ public:
+  explicit PyClientExtensions(std::vector<fizz::Extension> exts)
+      : exts_(std::move(exts)) {}
+
+  fizz::Status getClientHelloExtensions(
+      std::vector<fizz::Extension>& ret,
+      fizz::Error&) const override {
+    for (const auto& e : exts_) {
+      ret.push_back(e.clone());
+    }
+    return fizz::Status::Success;
+  }
+
+  fizz::Status onEncryptedExtensions(
+      fizz::Error&,
+      const std::vector<fizz::Extension>&) override {
+    return fizz::Status::Success;
+  }
+
+ private:
+  std::vector<fizz::Extension> exts_;
+};
+
 } // namespace
 
 // A single TLS 1.3 connection. Owns an AsyncFizzClient living on the shared
@@ -175,6 +205,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
       bool verify,
       const std::string& caFile,
       uint32_t timeoutMs,
+      std::vector<std::pair<uint16_t, std::string>> extensions,
       py::function resolve,
       py::function reject) {
     auto promise = std::make_shared<Promise>(
@@ -182,6 +213,9 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     auto alpnsPtr = std::make_shared<std::vector<std::string>>(std::move(alpns));
     auto groupsPtr =
         std::make_shared<std::vector<fizz::NamedGroup>>(std::move(groups));
+    auto extsPtr =
+        std::make_shared<std::vector<std::pair<uint16_t, std::string>>>(
+            std::move(extensions));
 
     evb_->runInEventBaseThread([this,
                                 host,
@@ -192,6 +226,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
                                 verify,
                                 caFile,
                                 timeoutMs,
+                                extsPtr,
                                 promise]() mutable {
       try {
         auto ctx = std::make_shared<fizz::client::FizzClientContext>();
@@ -224,8 +259,21 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
           verifier = std::make_shared<fizz::InsecureAcceptAnyCertificate>();
         }
 
+        std::shared_ptr<fizz::ClientExtensions> clientExts;
+        if (!extsPtr->empty()) {
+          std::vector<fizz::Extension> fexts;
+          fexts.reserve(extsPtr->size());
+          for (const auto& [type, data] : *extsPtr) {
+            fizz::Extension ext;
+            ext.extension_type = static_cast<fizz::ExtensionType>(type);
+            ext.extension_data = folly::IOBuf::copyBuffer(data);
+            fexts.push_back(std::move(ext));
+          }
+          clientExts = std::make_shared<PyClientExtensions>(std::move(fexts));
+        }
+
         client_ = fizz::client::AsyncFizzClient::UniquePtr(
-            new fizz::client::AsyncFizzClient(evb_, ctx));
+            new fizz::client::AsyncFizzClient(evb_, ctx, clientExts));
 
         folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
         auto* cb = new ConnectCb(this, promise);
@@ -550,6 +598,7 @@ PYBIND11_MODULE(_core, m) {
           py::arg("verify"),
           py::arg("ca_file"),
           py::arg("timeout_ms"),
+          py::arg("extensions"),
           py::arg("resolve"),
           py::arg("reject"))
       .def("write", &TlsConnection::write, py::arg("data"), py::arg("resolve"), py::arg("reject"))
