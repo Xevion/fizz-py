@@ -19,9 +19,10 @@ wheel:
 test *args="-m 'not network'":
     pytest {{args}}
 
-# Lint Python.
+# Lint and type-check Python.
 check:
     ruff check .
+    basedpyright
 
 # Format Python and C++ in place.
 fmt:

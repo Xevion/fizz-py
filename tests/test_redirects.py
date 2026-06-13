@@ -26,17 +26,28 @@ class TestNextRedirect:
         )
 
     def test_303_forces_get(self):
-        assert next_redirect("POST", "https://x/", 303, "/next") == ("GET", "https://x/next")
+        assert next_redirect("POST", "https://x/", 303, "/next") == (
+            "GET",
+            "https://x/next",
+        )
 
     def test_302_downgrades_post_to_get(self):
-        assert next_redirect("POST", "https://x/", 302, "/next") == ("GET", "https://x/next")
+        assert next_redirect("POST", "https://x/", 302, "/next") == (
+            "GET",
+            "https://x/next",
+        )
 
     def test_307_preserves_method(self):
-        assert next_redirect("POST", "https://x/", 307, "/next") == ("POST", "https://x/next")
+        assert next_redirect("POST", "https://x/", 307, "/next") == (
+            "POST",
+            "https://x/next",
+        )
 
 
 def test_strip_body_headers_drops_framing():
-    out = strip_body_headers({"Content-Type": "x", "X-Keep": "y", "Content-Length": "3"})
+    out = strip_body_headers(
+        {"Content-Type": "x", "X-Keep": "y", "Content-Length": "3"}
+    )
     assert out == {"X-Keep": "y"}
 
 
@@ -69,10 +80,14 @@ def test_too_many_redirects_raises(local_server):
 
 
 def test_303_redirect_downgrades_post_to_get(local_server):
-    r = fizzpy.request("POST", _at(local_server, "/redirect-303"), verify=False, body=b"x")
+    r = fizzpy.request(
+        "POST", _at(local_server, "/redirect-303"), verify=False, body=b"x"
+    )
     assert r.content == b"GET"
 
 
 def test_307_redirect_preserves_post(local_server):
-    r = fizzpy.request("POST", _at(local_server, "/redirect-307"), verify=False, body=b"x")
+    r = fizzpy.request(
+        "POST", _at(local_server, "/redirect-307"), verify=False, body=b"x"
+    )
     assert r.content == b"POST"

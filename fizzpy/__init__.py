@@ -17,7 +17,7 @@ hostname is checked against the certificate's SAN by default.
 from __future__ import annotations
 
 import threading
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from . import _core
 from ._common import (
@@ -40,18 +40,18 @@ from ._transport import run_sync
 
 __all__ = [
     "Client",
-    "Response",
-    "Headers",
     "Extension",
+    "Headers",
     "NamedGroup",
-    "TooManyRedirects",
-    "request",
-    "get",
-    "post",
-    "head",
-    "put",
-    "delete",
+    "Response",
     "TlsParameters",
+    "TooManyRedirects",
+    "delete",
+    "get",
+    "head",
+    "post",
+    "put",
+    "request",
 ]
 
 # Negotiated parameters are returned from the core as a plain dict; expose the
@@ -76,11 +76,11 @@ class Client:
         self,
         *,
         verify: bool = True,
-        cafile: Optional[str] = None,
+        cafile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
-        alpn: Optional[list[str]] = None,
-        groups: Optional[list] = None,
-        extensions: Optional[list] = None,
+        alpn: list[str] | None = None,
+        groups: list | None = None,
+        extensions: list | None = None,
         follow_redirects: bool = True,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
@@ -100,8 +100,8 @@ class Client:
         method: str,
         url: str,
         *,
-        headers: Optional[Mapping[str, str]] = None,
-        body: Optional[bytes] = None,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
     ) -> Response:
         method = method.upper()
         seen = 0
@@ -131,8 +131,8 @@ class Client:
         method: str,
         url: str,
         *,
-        headers: Optional[Mapping[str, str]] = None,
-        body: Optional[bytes] = None,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
     ) -> Response:
         target = parse_url(url)
         key = (target.host, target.port)
@@ -149,7 +149,7 @@ class Client:
 
         return self._exchange(self._connect(target), key, raw, reused=False)
 
-    def _connect(self, target) -> "_core.TlsConnection":
+    def _connect(self, target) -> _core.TlsConnection:
         conn = _core.TlsConnection()
         run_sync(
             lambda resolve, reject: conn.connect(
@@ -246,7 +246,7 @@ class Client:
     def delete(self, url: str, **kwargs) -> Response:
         return self.request("DELETE", url, **kwargs)
 
-    def __enter__(self) -> "Client":
+    def __enter__(self) -> Client:
         return self
 
     def __exit__(self, *exc) -> None:

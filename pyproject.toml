@@ -13,11 +13,59 @@ dependencies = ["certifi"]
 
 [project.optional-dependencies]
 test = ["pytest"]
-dev = ["pytest", "ruff", "scikit-build-core", "pybind11", "pybind11-stubgen"]
+dev = ["pytest", "ruff", "basedpyright", "scikit-build-core", "pybind11", "pybind11-stubgen"]
 
 [tool.ruff]
+target-version = "py310"
 # Build/dev artifacts carry their own (or no) style.
 extend-exclude = [".dev", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RET",  # flake8-return
+    "PIE",  # flake8-pie
+    "PT",   # flake8-pytest-style
+    "TID",  # flake8-tidy-imports
+    "ISC",  # flake8-implicit-str-concat
+    "FBT",  # flake8-boolean-trap
+    "PGH",  # pygrep-hooks (blanket noqa / type:ignore)
+    "PERF", # perflint
+    "FURB", # refurb
+    "FLY",  # flynt
+    "RUF",  # ruff-specific
+]
+# Public exception names mirror requests/httpx (e.g. TooManyRedirects), which
+# deliberately omit the Error suffix N818 wants.
+ignore = ["N818"]
+
+[tool.ruff.lint.per-file-ignores]
+# The stub mirrors the pybind11 method names (camelCase) verbatim.
+"*.pyi" = ["N802", "N803", "N815"]
+# Tests use stdlib handler overrides (do_GET), broad raises, and fixture
+# patterns the strict library rules would otherwise flag.
+"tests/**" = ["FBT", "PT011", "B017", "N802", "N815"]
+# Dev scripts dispatch CLI flags as positional bools.
+"scripts/**" = ["FBT"]
+
+[tool.basedpyright]
+# Strict correctness checking, minus the Any-purity rules: the native _core
+# boundary and the resolve/reject bridge legitimately traffic in Any.
+typeCheckingMode = "strict"
+pythonVersion = "3.10"
+include = ["fizzpy"]
+exclude = ["pybind11", ".dev", "build", "dist", "**/__pycache__"]
+reportAny = false
+reportExplicitAny = false
+reportUnannotatedClassAttribute = false
 
 [tool.scikit-build]
 build-dir = "build/{wheel_tag}"

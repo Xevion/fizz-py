@@ -85,6 +85,9 @@ def ensure(force: bool) -> None:
     # OpenSSL 3.6 (deprecated EVP_PKEY_cmp); the library itself is fine.
     # find_package(liboqs CONFIG) inside Fizz auto-sets FIZZ_HAVE_OQS and links
     # OQS::oqs, so post-quantum support follows from liboqs being on the path.
+    cmake_prefix = ";".join(
+        str(p) for p in (brew, brew / "opt" / "liboqs", brew / "opt" / "libsodium")
+    )
     run(
         [
             "cmake",
@@ -96,7 +99,7 @@ def ensure(force: bool) -> None:
             "Ninja",
             f"-DCMAKE_INSTALL_PREFIX={PREFIX}",
             f"-DCMAKE_MODULE_PATH={SRC / 'build' / 'fbcode_builder' / 'CMake'}",
-            f"-DCMAKE_PREFIX_PATH={brew};{brew / 'opt' / 'liboqs'};{brew / 'opt' / 'libsodium'}",
+            f"-DCMAKE_PREFIX_PATH={cmake_prefix}",
             "-DBUILD_EXAMPLES=OFF",
             "-DBUILD_TESTS=OFF",
         ]

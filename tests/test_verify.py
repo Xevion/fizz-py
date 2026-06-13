@@ -40,7 +40,7 @@ def test_trusted_chain_with_wrong_hostname_is_rejected(ca_server):
 
 
 def test_wrong_hostname_accepted_when_verification_disabled(ca_server):
-    url, cafile, body = ca_server("wrong.example")
+    url, _cafile, body = ca_server("wrong.example")
     with fizzpy.Client(verify=False) as client:
         r = client.get(url)
     assert r.status_code == 200

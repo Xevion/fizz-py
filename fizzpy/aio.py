@@ -17,7 +17,7 @@ same; only the resolve/reject bridge differs (see :mod:`fizzpy._transport`).
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from . import _core
 from ._common import (
@@ -56,11 +56,11 @@ class AsyncClient:
         self,
         *,
         verify: bool = True,
-        cafile: Optional[str] = None,
+        cafile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
-        alpn: Optional[list[str]] = None,
-        groups: Optional[list] = None,
-        extensions: Optional[list] = None,
+        alpn: list[str] | None = None,
+        groups: list | None = None,
+        extensions: list | None = None,
         follow_redirects: bool = True,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
@@ -79,8 +79,8 @@ class AsyncClient:
         method: str,
         url: str,
         *,
-        headers: Optional[Mapping[str, str]] = None,
-        body: Optional[bytes] = None,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
     ) -> Response:
         method = method.upper()
         seen = 0
@@ -110,8 +110,8 @@ class AsyncClient:
         method: str,
         url: str,
         *,
-        headers: Optional[Mapping[str, str]] = None,
-        body: Optional[bytes] = None,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
     ) -> Response:
         target = parse_url(url)
         key = (target.host, target.port)
@@ -219,7 +219,7 @@ class AsyncClient:
     async def delete(self, url: str, **kwargs) -> Response:
         return await self.request("DELETE", url, **kwargs)
 
-    async def __aenter__(self) -> "AsyncClient":
+    async def __aenter__(self) -> AsyncClient:
         return self
 
     async def __aexit__(self, *exc) -> None:

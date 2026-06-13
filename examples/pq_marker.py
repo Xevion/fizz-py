@@ -17,7 +17,7 @@ an extension of type 65114 (0xFE5A) whose data is the marker bytes.
 
 import fizzpy
 
-# 0xFE00–0xFEFF is the TLS "reserved for private use" range — safe for an
+# 0xFE00-0xFEFF is the TLS "reserved for private use" range, safe for an
 # experimental marker that won't collide with an IANA-registered extension type.
 MARKER_TYPE = 0xFE5A
 MARKER_DATA = b"hello from fizzpy"

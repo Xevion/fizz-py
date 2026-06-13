@@ -118,12 +118,7 @@ class TestHeaders:
 
 class TestContentLengthFraming:
     def test_simple(self):
-        raw = (
-            b"HTTP/1.1 200 OK\r\n"
-            b"Content-Length: 5\r\n"
-            b"\r\n"
-            b"hello"
-        )
+        raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"
         resp = parse_all(raw)
         assert resp.status_code == 200
         assert resp.reason == "OK"
@@ -229,7 +224,7 @@ class TestNoBodyStatuses:
         assert resp.content == b""
 
     def test_304_completes_immediately(self):
-        resp = parse_all(b"HTTP/1.1 304 Not Modified\r\nETag: \"abc\"\r\n\r\n")
+        resp = parse_all(b'HTTP/1.1 304 Not Modified\r\nETag: "abc"\r\n\r\n')
         assert resp.status_code == 304
         assert resp.content == b""
 
@@ -303,7 +298,7 @@ class TestDecompression:
 
 class TestResponseHelpers:
     def test_text_default_utf8(self):
-        resp = Response(200, "OK", "HTTP/1.1", Headers(), "héllo".encode("utf-8"))
+        resp = Response(200, "OK", "HTTP/1.1", Headers(), "héllo".encode())
         assert resp.text == "héllo"
 
     def test_text_charset_from_content_type(self):
@@ -339,9 +334,7 @@ class TestMalformedInput:
     def test_bad_chunk_size(self):
         parser = ResponseParser()
         with pytest.raises(HttpParseError):
-            parser.feed(
-                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n"
-            )
+            parser.feed(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n")
 
     def test_http_parse_error_is_value_error(self):
         assert issubclass(HttpParseError, ValueError)

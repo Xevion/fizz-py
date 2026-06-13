@@ -130,8 +130,19 @@ def self_signed_server(tmp_path_factory):
     d = tmp_path_factory.mktemp("selfsigned")
     cert, key = str(d / "cert.pem"), str(d / "key.pem")
     _openssl(
-        "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert,
-        "-days", "1", "-nodes", "-subj", "/CN=localhost",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+        "-nodes",
+        "-subj",
+        "/CN=localhost",
     )
     httpd, thread, port = _serve_tls(cert, key)
     try:
@@ -227,8 +238,19 @@ def local_server(tmp_path):
     """
     cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
     _openssl(
-        "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert,
-        "-days", "1", "-nodes", "-subj", "/CN=localhost",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-keyout",
+        key,
+        "-out",
+        cert,
+        "-days",
+        "1",
+        "-nodes",
+        "-subj",
+        "/CN=localhost",
     )
     httpd, thread, port = _serve_app(cert, key)
 
@@ -258,10 +280,23 @@ def ca_server(tmp_path):
     started = []
     ca_crt, ca_key = str(tmp_path / "ca.crt"), str(tmp_path / "ca.key")
     _openssl(
-        "req", "-x509", "-newkey", "rsa:2048", "-keyout", ca_key, "-out", ca_crt,
-        "-days", "1", "-nodes", "-subj", "/CN=fizzpy Test CA",
-        "-addext", "basicConstraints=critical,CA:TRUE",
-        "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-keyout",
+        ca_key,
+        "-out",
+        ca_crt,
+        "-days",
+        "1",
+        "-nodes",
+        "-subj",
+        "/CN=fizzpy Test CA",
+        "-addext",
+        "basicConstraints=critical,CA:TRUE",
+        "-addext",
+        "keyUsage=critical,keyCertSign,cRLSign",
     )
 
     def start(san: str):
@@ -270,13 +305,35 @@ def ca_server(tmp_path):
         crt = str(tmp_path / f"{tag}.crt")
         key = str(tmp_path / f"{tag}.key")
         _openssl(
-            "req", "-newkey", "rsa:2048", "-keyout", key, "-out", csr,
-            "-nodes", "-subj", f"/CN={san}", "-addext", f"subjectAltName=DNS:{san}",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key,
+            "-out",
+            csr,
+            "-nodes",
+            "-subj",
+            f"/CN={san}",
+            "-addext",
+            f"subjectAltName=DNS:{san}",
         )
         _openssl(
-            "x509", "-req", "-in", csr, "-CA", ca_crt, "-CAkey", ca_key,
-            "-CAcreateserial", "-out", crt, "-days", "1",
-            "-copy_extensions", "copyall",
+            "x509",
+            "-req",
+            "-in",
+            csr,
+            "-CA",
+            ca_crt,
+            "-CAkey",
+            ca_key,
+            "-CAcreateserial",
+            "-out",
+            crt,
+            "-days",
+            "1",
+            "-copy_extensions",
+            "copyall",
         )
         httpd, thread, port = _serve_tls(crt, key)
         started.append((httpd, thread))

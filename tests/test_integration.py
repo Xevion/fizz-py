@@ -55,11 +55,10 @@ def test_classical_group_still_works():
 def test_async_concurrent_requests():
     async def main():
         async with AsyncClient() as client:
-            results = await asyncio.gather(
+            return await asyncio.gather(
                 client.get(HOST),
                 client.get("https://www.cloudflare.com"),
             )
-            return results
 
     r1, r2 = asyncio.run(main())
     assert r1.status_code == 200

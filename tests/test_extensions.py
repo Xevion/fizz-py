@@ -3,9 +3,9 @@
 import time
 
 import pytest
+from _clienthello import parse_clienthello_extensions
 
 import fizzpy
-from _clienthello import parse_clienthello_extensions
 
 MARKER_TYPE = 0xFE5A
 MARKER_DATA = b"hello from fizzpy"

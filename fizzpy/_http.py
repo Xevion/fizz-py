@@ -17,14 +17,14 @@ import gzip
 import json
 import re
 import zlib
-from typing import Iterator
+from collections.abc import Iterator
 
 __all__ = [
-    "HttpParseError",
-    "build_request",
     "Headers",
+    "HttpParseError",
     "Response",
     "ResponseParser",
+    "build_request",
 ]
 
 
@@ -396,9 +396,7 @@ class ResponseParser:
                 try:
                     chunk_size = int(size_token, 16)
                 except ValueError as exc:
-                    raise HttpParseError(
-                        f"invalid chunk size: {size_line!r}"
-                    ) from exc
+                    raise HttpParseError(f"invalid chunk size: {size_line!r}") from exc
                 del self._buf[: idx + 2]
                 if chunk_size == 0:
                     # Final chunk: what follows is optional trailers then CRLF.
