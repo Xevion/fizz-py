@@ -125,3 +125,16 @@ repair-wheel-command = "LD_LIBRARY_PATH=\"$(echo /opt/fizz-deps/installed/*/lib 
 
 [tool.cibuildwheel.linux.environment]
 FIZZPY_BUILD_INFO = "/opt/fizzpy-build"
+
+# macOS/Windows have no prebuilt deps image, so before-all builds the folly+fizz+
+# liboqs tree on the runner. wheels-extra.yml supplies FIZZ_SRC/GETDEPS_SCRATCH/
+# FIZZPY_BUILD_INFO per-runner and caches the scratch dir. delocate/delvewheel
+# (the default repair tools) may still need their library search path widened to
+# the getdeps install dirs — tuned interactively via the branch's tmate session.
+[tool.cibuildwheel.macos]
+before-all = "python3 scripts/build_fizz_deps_native.py"
+before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
+
+[tool.cibuildwheel.windows]
+before-all = "python scripts/build_fizz_deps_native.py"
+before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"

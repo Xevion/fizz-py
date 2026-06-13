@@ -7,15 +7,15 @@ project(
   VERSION ${SKBUILD_PROJECT_VERSION}
   LANGUAGES CXX)
 
-# Only Linux x86_64 wheels are published. Stop here before the (~40 min) folly +
-# fizz + liboqs source build that an sdist install would otherwise attempt and
-# fail on macOS/Windows.
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Wheels target Linux, macOS, and Windows. Other platforms stop here before the
+# (~40 min) folly + fizz + liboqs source build an sdist install would attempt.
+if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin|Windows)$")
   message(
     FATAL_ERROR
-    "fizzpy publishes prebuilt Linux x86_64 wheels only; ${CMAKE_SYSTEM_NAME} "
-    "is not yet supported. Building from source needs the Fizz toolchain — see "
-    "BUILDING.md (https://github.com/Xevion/fizz-py/blob/master/BUILDING.md).")
+    "fizzpy publishes prebuilt wheels for Linux, macOS, and Windows; "
+    "${CMAKE_SYSTEM_NAME} is not supported. Building from source needs the Fizz "
+    "toolchain — see BUILDING.md "
+    "(https://github.com/Xevion/fizz-py/blob/master/BUILDING.md).")
 endif()
 
 # Fizz's CMake config pulls in its bundled FindSodium.cmake. Homebrew installs

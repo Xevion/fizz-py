@@ -1,0 +1,91 @@
+name: Wheels (platform)
+
+# macOS + Windows wheel bring-up. Scoped to the platform-wheels branch so master
+# CI is unaffected until these prove out and merge. Trigger a run with the debug
+# input to drop into a tmate SSH session on the runner and iterate on the build
+# live instead of the push/wait loop.
+on:
+  push:
+    branches: [platform-wheels]
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Pause in a tmate SSH session before building"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same tag the Linux deps image pins, so all platforms build the same fizz.
+  FIZZ_TAG: v2026.06.08.00
+
+jobs:
+  build_wheels:
+    name: Wheel ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel = x86_64, macos-14 = arm64 (native per runner). One
+        # interpreter while bringing the build up; fan out cp310-cp314 per platform
+        # once it is green.
+        os: [macos-15-intel, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve deps paths (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "GETDEPS_SCRATCH=$HOME/fizz-deps"
+            echo "FIZZPY_BUILD_INFO=$HOME/fizzpy-build"
+            echo "FIZZ_SRC=$HOME/fizz-src"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve deps paths (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "GETDEPS_SCRATCH=C:/fizz-deps"
+            echo "FIZZPY_BUILD_INFO=C:/fizzpy-build"
+            echo "FIZZ_SRC=C:/fizz-src"
+          } >> "$GITHUB_ENV"
+
+      # The getdeps tree is the ~40-min cost; key it on the build script + tag so a
+      # warm cache turns before-all into a near no-op.
+      - name: Cache deps tree
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GETDEPS_SCRATCH }}
+            ${{ env.FIZZPY_BUILD_INFO }}
+            ${{ env.FIZZ_SRC }}
+          key: deps-${{ matrix.os }}-${{ env.FIZZ_TAG }}-${{ hashFiles('scripts/build_fizz_deps_native.py') }}
+
+      - name: Debug session (tmate)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v4.1.0
+        env:
+          CIBW_BUILD: cp312-*
+          CIBW_ENVIRONMENT: >-
+            FIZZ_TAG=${{ env.FIZZ_TAG }}
+            FIZZ_SRC=${{ env.FIZZ_SRC }}
+            GETDEPS_SCRATCH=${{ env.GETDEPS_SCRATCH }}
+            FIZZPY_BUILD_INFO=${{ env.FIZZPY_BUILD_INFO }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
