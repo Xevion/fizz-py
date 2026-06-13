@@ -111,10 +111,10 @@ build-frontend = { name = "pip", args = ["--no-build-isolation"] }
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
-# Prebuilt by .github/workflows/manylinux-image.yml: the folly+fizz+liboqs tree
-# is already installed, so there is no before-all here — each build just compiles
-# _core against the baked prefix that CMake reads from $FIZZPY_BUILD_INFO.
-manylinux-x86_64-image = "ghcr.io/xevion/fizz-py-deps:latest"
+# The deps image carries the prebuilt folly+fizz+liboqs tree, so there is no
+# before-all — each build just compiles _core against the baked prefix CMake
+# reads from $FIZZPY_BUILD_INFO. CI sets the image ref (content-addressed, owner
+# resolved at runtime) via CIBW_MANYLINUX_X86_64_IMAGE in wheels.yml.
 before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 
 [tool.cibuildwheel.linux.environment]

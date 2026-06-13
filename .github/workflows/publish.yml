@@ -6,8 +6,12 @@ on:
 
 jobs:
   # Reuse the wheel/sdist build so a tag produces exactly the artifacts CI
-  # already validates on every push.
+  # already validates on every push. packages: write lets the deps_image job
+  # rebuild the image if a tag introduces a deps change with no prior push.
   build:
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/wheels.yml
 
   publish:
