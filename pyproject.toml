@@ -116,6 +116,12 @@ archs = ["x86_64"]
 # reads from $FIZZPY_BUILD_INFO. CI sets the image ref (content-addressed, owner
 # resolved at runtime) via CIBW_MANYLINUX_X86_64_IMAGE in wheels.yml.
 before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
+# glog's exported config links gflags_shared, so _core picks up a runtime
+# dependency on libgflags.so. auditwheel only searches LD_LIBRARY_PATH for
+# external libs to vendor; the getdeps install dirs aren't on it by default. This
+# runs in the container's real shell, so the glob+pipe is fine (the `environment`
+# table uses a restricted evaluator that rejects pipes).
+repair-wheel-command = "LD_LIBRARY_PATH=\"$(echo /opt/fizz-deps/installed/*/lib /opt/fizz-deps/installed/*/lib64 | tr ' ' ':'):$LD_LIBRARY_PATH\" auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.linux.environment]
 FIZZPY_BUILD_INFO = "/opt/fizzpy-build"
