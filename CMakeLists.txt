@@ -7,6 +7,17 @@ project(
   VERSION ${SKBUILD_PROJECT_VERSION}
   LANGUAGES CXX)
 
+# Only Linux x86_64 wheels are published. Stop here before the (~40 min) folly +
+# fizz + liboqs source build that an sdist install would otherwise attempt and
+# fail on macOS/Windows.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(
+    FATAL_ERROR
+    "fizzpy publishes prebuilt Linux x86_64 wheels only; ${CMAKE_SYSTEM_NAME} "
+    "is not yet supported. Building from source needs the Fizz toolchain — see "
+    "BUILDING.md (https://github.com/Xevion/fizz-py/blob/master/BUILDING.md).")
+endif()
+
 # Fizz's CMake config pulls in its bundled FindSodium.cmake. Homebrew installs
 # it under libexec/cmake; make that discoverable for local (non-vcpkg) builds.
 # Override with -DFIZZ_CMAKE_MODULE_DIR=... if your install differs.
@@ -22,6 +33,37 @@ if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
+
+# Portable-wheel builds: scripts/build_fizz_deps.py (cibuildwheel before-all)
+# writes the getdeps install prefixes and fizz's find-module dir here. Read them
+# at configure time rather than as a CIBW environment substitution, which would
+# evaluate before before-all has produced the files. Skipped for local builds,
+# which pass -DCMAKE_PREFIX_PATH directly (see BUILDING.md).
+if(DEFINED ENV{FIZZPY_BUILD_INFO})
+  set(_info "$ENV{FIZZPY_BUILD_INFO}")
+  if(EXISTS "${_info}/prefix.txt")
+    file(STRINGS "${_info}/prefix.txt" _fizz_prefix)
+    list(APPEND CMAKE_PREFIX_PATH ${_fizz_prefix})
+  endif()
+  if(EXISTS "${_info}/module_dir.txt")
+    file(STRINGS "${_info}/module_dir.txt" _fizz_modules)
+    list(APPEND CMAKE_MODULE_PATH ${_fizz_modules})
+  endif()
+endif()
+
+# pybind11 is pip-installed (locally, or by before-build in wheel builds); add its
+# CMake config so find_package locates it without a CIBW env substitution.
+find_package(Python COMPONENTS Interpreter QUIET)
+if(Python_Interpreter_FOUND)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
+    OUTPUT_VARIABLE _pybind11_cmakedir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(_pybind11_cmakedir)
+    list(APPEND CMAKE_PREFIX_PATH "${_pybind11_cmakedir}")
+  endif()
+endif()
 
 set(PYBIND11_NEWPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)

@@ -2,9 +2,11 @@ name: Wheels
 
 on:
   push:
+    branches: [master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,21 +26,39 @@ jobs:
           path: dist/*.tar.gz
 
   build_wheels:
-    name: Build manylinux wheels (x86_64)
+    # One job per interpreter, each compiling _core against the prebuilt
+    # ghcr.io/.../fizz-py-deps image (the heavy folly+fizz+liboqs tree is baked
+    # in, so this is minutes, not ~40 min). liboqs travels with fizz's getdeps
+    # manifest, giving real post-quantum (X25519MLKEM768) support.
+    name: Wheel ${{ matrix.python }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [cp310, cp311, cp312, cp313, cp314]
     steps:
       - uses: actions/checkout@v4
 
-      # Builds folly + fizz + liboqs from source inside the manylinux container
-      # (see scripts/build_fizz_deps.py), so the dep tree is heavy: expect ~40 min on
-      # a cold cache. liboqs travels with fizz's getdeps manifest, giving the
-      # shipped wheel real post-quantum (X25519MLKEM768) support.
-      - name: Build wheels
+      # cibuildwheel pulls the deps image via docker; authenticate so the GHCR
+      # package is reachable.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build wheel
         uses: pypa/cibuildwheel@v4.1.0
+        env:
+          CIBW_BUILD: ${{ matrix.python }}-*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-manylinux-x86_64
+          name: wheels-${{ matrix.python }}
           path: wheelhouse/*.whl
           if-no-files-found: error
