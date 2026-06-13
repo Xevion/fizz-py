@@ -7,6 +7,12 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+  # Rebuild wheels against the deps image as soon as it finishes rebuilding, so a
+  # change to the folly/fizz tree propagates without a manual re-run. Normal code
+  # pushes still build against the existing :latest image via the push trigger.
+  workflow_run:
+    workflows: ["Manylinux deps image"]
+    types: [completed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,10 +23,12 @@ jobs:
     name: Build sdist
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Skip when chained off a failed image rebuild.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: pipx run build --sdist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -33,6 +41,7 @@ jobs:
     name: Wheel ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: read
@@ -41,12 +50,12 @@ jobs:
       matrix:
         python: [cp310, cp311, cp312, cp313, cp314]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # cibuildwheel pulls the deps image via docker; authenticate so the GHCR
       # package is reachable.
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -57,7 +66,7 @@ jobs:
         env:
           CIBW_BUILD: ${{ matrix.python }}-*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.python }}
           path: wheelhouse/*.whl

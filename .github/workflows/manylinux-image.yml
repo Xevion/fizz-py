@@ -17,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/fizz-py-deps
+  # GHCR repository names must be lowercase; keep in sync with the
+  # manylinux-x86_64-image pin in pyproject.toml.
+  IMAGE: ghcr.io/xevion/fizz-py-deps
 
 jobs:
   build:
@@ -28,17 +30,17 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: .github/manylinux-deps.Dockerfile
