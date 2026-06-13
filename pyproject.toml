@@ -11,9 +11,14 @@ requires-python = ">=3.10"
 authors = [{ name = "Ryan Walters", email = "ryan@walters.to" }]
 dependencies = ["certifi"]
 
+# `dev` typechecks against the committed _core.pyi, so CI never builds the
+# native extension to lint: `uv sync --no-install-project --group dev`.
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.15", "basedpyright>=1.39"]
+build = ["scikit-build-core", "pybind11>=2.13", "pybind11-stubgen"]
+
 [project.optional-dependencies]
-test = ["pytest"]
-dev = ["pytest", "ruff", "basedpyright", "scikit-build-core", "pybind11", "pybind11-stubgen"]
+test = ["pytest>=8"]
 
 [tool.ruff]
 target-version = "py310"

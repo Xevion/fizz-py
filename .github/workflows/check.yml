@@ -1,0 +1,38 @@
+name: Check
+
+on:
+  push:
+    branches: [master]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # _core.pyi lets ruff and basedpyright run without the native build.
+      - name: Sync toolchain
+        run: uv sync --no-install-project --group dev
+
+      - name: Lint
+        run: uv run --no-sync ruff check --output-format=github .
+
+      - name: Format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Type check
+        run: uv run --no-sync basedpyright

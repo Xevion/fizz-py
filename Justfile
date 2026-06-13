@@ -19,12 +19,17 @@ wheel:
 test *args="-m 'not network'":
     pytest {{args}}
 
+# Install the lint/type toolchain into .venv without building _core.
+_tools:
+    uv sync --no-install-project --group dev
+
 # Lint and type-check Python.
-check:
-    ruff check .
-    basedpyright
+check: _tools
+    uv run --no-sync ruff check .
+    uv run --no-sync ruff format --check .
+    uv run --no-sync basedpyright
 
 # Format Python and C++ in place.
-fmt:
-    ruff format .
+fmt: _tools
+    uv run --no-sync ruff format .
     clang-format -i _core.cpp
