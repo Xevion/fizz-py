@@ -96,6 +96,15 @@ class Headers:
         entry = self._store.get(key.lower())
         return list(entry[1]) if entry else []
 
+    def append_to_last(self, text: str) -> None:
+        """Fold an RFC 7230 continuation line onto the most recently added value.
+
+        Raises ``KeyError`` if no header has been added yet.
+        """
+        key = next(reversed(self._store))
+        _, values = self._store[key]
+        values[-1] = f"{values[-1]} {text}"
+
     def get(self, key: str, default: str | None = None) -> str | None:
         entry = self._store.get(key.lower())
         if entry is None:
@@ -145,7 +154,7 @@ class Response:
         self.content = content
         # Populated by the client after the transport completes.
         self.url: str = ""
-        self.tls: dict | None = None
+        self.tls: dict[str, object] | None = None
 
     @property
     def text(self) -> str:
@@ -274,7 +283,7 @@ class ResponseParser:
     def _parse_headers(self) -> None:
         # A leading CRLF means the header block is empty (status line then the
         # terminating blank line, e.g. "HTTP/1.1 204 No Content\r\n\r\n").
-        if self._buf[:2] == b"\r\n":
+        if self._buf.startswith(b"\r\n"):
             del self._buf[:2]
             block = b""
         else:
@@ -296,11 +305,7 @@ class ResponseParser:
             if raw[:1] in (b" ", b"\t"):
                 if not list(self._headers.items()):
                     raise HttpParseError("header continuation with no prior header")
-                names = list(self._headers)
-                last = names[-1]
-                values = self._headers.get_list(last)
-                values[-1] = values[-1] + " " + raw.strip().decode("latin-1")
-                self._headers._store[last.lower()] = (last, values)
+                self._headers.append_to_last(raw.strip().decode("latin-1"))
                 continue
             colon = raw.find(b":")
             if colon <= 0:
@@ -372,7 +377,7 @@ class ResponseParser:
                 end = self._buf.find(b"\r\n\r\n")
                 # Trailers may be absent, in which case the terminator already
                 # appeared as a lone CRLF consumed below; handle both shapes.
-                if self._buf[:2] == b"\r\n":
+                if self._buf.startswith(b"\r\n"):
                     del self._buf[:2]
                     self._finalize()
                     return
@@ -421,7 +426,7 @@ class ResponseParser:
                 if self._eof:
                     raise HttpParseError("EOF before chunk terminator")
                 return
-            if self._buf[:2] != b"\r\n":
+            if not self._buf.startswith(b"\r\n"):
                 raise HttpParseError("missing CRLF after chunk data")
             del self._buf[:2]
             self._awaiting_chunk_size = True

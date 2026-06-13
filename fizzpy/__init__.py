@@ -17,7 +17,8 @@ hostname is checked against the certificate's SAN by default.
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from . import _core
 from ._common import (
@@ -27,6 +28,7 @@ from ._common import (
     DEFAULT_TIMEOUT_MS,
     READ_DONE,
     Extension,
+    Target,
     TooManyRedirects,
     default_ca_file,
     next_redirect,
@@ -79,8 +81,8 @@ class Client:
         cafile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: list[str] | None = None,
-        groups: list | None = None,
-        extensions: list | None = None,
+        groups: list[_core.NamedGroup] | None = None,
+        extensions: Sequence[tuple[int, bytes]] | None = None,
         follow_redirects: bool = True,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
@@ -92,7 +94,7 @@ class Client:
         self._extensions = normalize_extensions(extensions)
         self._follow_redirects = follow_redirects
         self._max_redirects = max_redirects
-        self._pool: dict[tuple[str, int], list] = {}
+        self._pool: dict[tuple[str, int], list[_core.TlsConnection]] = {}
         self._lock = threading.Lock()
 
     def request(
@@ -149,7 +151,7 @@ class Client:
 
         return self._exchange(self._connect(target), key, raw, reused=False)
 
-    def _connect(self, target) -> _core.TlsConnection:
+    def _connect(self, target: Target) -> _core.TlsConnection:
         conn = _core.TlsConnection()
         run_sync(
             lambda resolve, reject: conn.connect(
@@ -168,7 +170,14 @@ class Client:
         )
         return conn
 
-    def _exchange(self, conn, key, raw: bytes, *, reused: bool) -> Response:
+    def _exchange(
+        self,
+        conn: _core.TlsConnection,
+        key: tuple[str, int],
+        raw: bytes,
+        *,
+        reused: bool,
+    ) -> Response:
         try:
             run_sync(lambda resolve, reject: conn.write(raw, resolve, reject))
         except Exception as exc:
@@ -214,12 +223,12 @@ class Client:
             return False
         return "close" not in (response.headers.get("Connection") or "").lower()
 
-    def _take(self, key):
+    def _take(self, key: tuple[str, int]) -> _core.TlsConnection | None:
         with self._lock:
             conns = self._pool.get(key)
             return conns.pop() if conns else None
 
-    def _give(self, key, conn) -> None:
+    def _give(self, key: tuple[str, int], conn: _core.TlsConnection) -> None:
         with self._lock:
             self._pool.setdefault(key, []).append(conn)
 
@@ -231,25 +240,25 @@ class Client:
         for conn in pooled:
             conn.close()
 
-    def get(self, url: str, **kwargs) -> Response:
+    def get(self, url: str, **kwargs: Any) -> Response:
         return self.request("GET", url, **kwargs)
 
-    def post(self, url: str, **kwargs) -> Response:
+    def post(self, url: str, **kwargs: Any) -> Response:
         return self.request("POST", url, **kwargs)
 
-    def head(self, url: str, **kwargs) -> Response:
+    def head(self, url: str, **kwargs: Any) -> Response:
         return self.request("HEAD", url, **kwargs)
 
-    def put(self, url: str, **kwargs) -> Response:
+    def put(self, url: str, **kwargs: Any) -> Response:
         return self.request("PUT", url, **kwargs)
 
-    def delete(self, url: str, **kwargs) -> Response:
+    def delete(self, url: str, **kwargs: Any) -> Response:
         return self.request("DELETE", url, **kwargs)
 
     def __enter__(self) -> Client:
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()
 
 
@@ -267,27 +276,27 @@ _CLIENT_KWARGS = frozenset(
 )
 
 
-def request(method: str, url: str, **kwargs) -> Response:
+def request(method: str, url: str, **kwargs: Any) -> Response:
     """One-shot request with a throwaway :class:`Client`."""
     client_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in _CLIENT_KWARGS}
     return Client(**client_kwargs).request(method, url, **kwargs)
 
 
-def get(url: str, **kwargs) -> Response:
+def get(url: str, **kwargs: Any) -> Response:
     return request("GET", url, **kwargs)
 
 
-def post(url: str, **kwargs) -> Response:
+def post(url: str, **kwargs: Any) -> Response:
     return request("POST", url, **kwargs)
 
 
-def head(url: str, **kwargs) -> Response:
+def head(url: str, **kwargs: Any) -> Response:
     return request("HEAD", url, **kwargs)
 
 
-def put(url: str, **kwargs) -> Response:
+def put(url: str, **kwargs: Any) -> Response:
     return request("PUT", url, **kwargs)
 
 
-def delete(url: str, **kwargs) -> Response:
+def delete(url: str, **kwargs: Any) -> Response:
     return request("DELETE", url, **kwargs)

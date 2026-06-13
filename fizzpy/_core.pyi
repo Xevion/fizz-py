@@ -74,9 +74,10 @@ class FizzClientContext:
     def setSendKeyShare(self, mode: SendKeyShare) -> None: ...
     def getSendKeyShare(self) -> SendKeyShare: ...
 
-# Negotiated TLS parameters returned by ``TlsConnection.negotiated``. Values are
-# strings except ``group_code``, the numeric NamedGroup codepoint.
-NegotiatedParams = dict[str, str | int]
+# Negotiated TLS parameters returned by ``TlsConnection.negotiated``. Keys:
+# version, cipher, group, alpn, sni, peer_cert (str) and group_code (the numeric
+# NamedGroup codepoint, int). Typed with an object value to stay a plain dict.
+NegotiatedParams = dict[str, object]
 
 class TlsConnection:
     """A single TLS 1.3 connection driven on the shared EventBase thread.

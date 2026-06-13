@@ -60,11 +60,11 @@ async def run_async(submit: Submit) -> Any:
     return await fut
 
 
-def _set_result(fut: asyncio.Future, result: Any) -> None:
+def _set_result(fut: asyncio.Future[Any], result: Any) -> None:
     if not fut.done():
         fut.set_result(result)
 
 
-def _set_exception(fut: asyncio.Future, error: BaseException) -> None:
+def _set_exception(fut: asyncio.Future[Any], error: BaseException) -> None:
     if not fut.done():
         fut.set_exception(error)

@@ -17,15 +17,17 @@ same; only the resolve/reject bridge differs (see :mod:`fizzpy._transport`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Any
 
-from . import _core
+from . import _core  # pyright: ignore[reportPrivateUsage]  # our own extension module
 from ._common import (
     DEFAULT_ALPN,
     DEFAULT_GROUPS,
     DEFAULT_MAX_REDIRECTS,
     DEFAULT_TIMEOUT_MS,
     READ_DONE,
+    Target,
     TooManyRedirects,
     default_ca_file,
     next_redirect,
@@ -59,8 +61,8 @@ class AsyncClient:
         cafile: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_MS / 1000,
         alpn: list[str] | None = None,
-        groups: list | None = None,
-        extensions: list | None = None,
+        groups: list[_core.NamedGroup] | None = None,
+        extensions: Sequence[tuple[int, bytes]] | None = None,
         follow_redirects: bool = True,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
     ) -> None:
@@ -72,7 +74,7 @@ class AsyncClient:
         self._extensions = normalize_extensions(extensions)
         self._follow_redirects = follow_redirects
         self._max_redirects = max_redirects
-        self._pool: dict[tuple[str, int], list] = {}
+        self._pool: dict[tuple[str, int], list[_core.TlsConnection]] = {}
 
     async def request(
         self,
@@ -128,7 +130,7 @@ class AsyncClient:
 
         return await self._exchange(await self._connect(target), key, raw, reused=False)
 
-    async def _connect(self, target):
+    async def _connect(self, target: Target) -> _core.TlsConnection:
         conn = _core.TlsConnection()
         await run_async(
             lambda resolve, reject: conn.connect(
@@ -147,7 +149,14 @@ class AsyncClient:
         )
         return conn
 
-    async def _exchange(self, conn, key, raw: bytes, *, reused: bool) -> Response:
+    async def _exchange(
+        self,
+        conn: _core.TlsConnection,
+        key: tuple[str, int],
+        raw: bytes,
+        *,
+        reused: bool,
+    ) -> Response:
         try:
             await run_async(lambda resolve, reject: conn.write(raw, resolve, reject))
         except Exception as exc:
@@ -193,7 +202,7 @@ class AsyncClient:
             return False
         return "close" not in (response.headers.get("Connection") or "").lower()
 
-    def _take(self, key):
+    def _take(self, key: tuple[str, int]) -> _core.TlsConnection | None:
         conns = self._pool.get(key)
         return conns.pop() if conns else None
 
@@ -204,23 +213,23 @@ class AsyncClient:
         for conn in pooled:
             conn.close()
 
-    async def get(self, url: str, **kwargs) -> Response:
+    async def get(self, url: str, **kwargs: Any) -> Response:
         return await self.request("GET", url, **kwargs)
 
-    async def post(self, url: str, **kwargs) -> Response:
+    async def post(self, url: str, **kwargs: Any) -> Response:
         return await self.request("POST", url, **kwargs)
 
-    async def head(self, url: str, **kwargs) -> Response:
+    async def head(self, url: str, **kwargs: Any) -> Response:
         return await self.request("HEAD", url, **kwargs)
 
-    async def put(self, url: str, **kwargs) -> Response:
+    async def put(self, url: str, **kwargs: Any) -> Response:
         return await self.request("PUT", url, **kwargs)
 
-    async def delete(self, url: str, **kwargs) -> Response:
+    async def delete(self, url: str, **kwargs: Any) -> Response:
         return await self.request("DELETE", url, **kwargs)
 
     async def __aenter__(self) -> AsyncClient:
         return self
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         await self.aclose()

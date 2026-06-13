@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urljoin, urlsplit
 
-from . import _core
+from . import _core  # pyright: ignore[reportPrivateUsage]  # our own extension module
 
 DEFAULT_ALPN = ["http/1.1"]
 DEFAULT_TIMEOUT_MS = 30_000
@@ -73,7 +74,9 @@ FIZZ_MANAGED_EXTENSIONS = frozenset(
 )
 
 
-def normalize_extensions(extensions) -> list[tuple[int, bytes]]:
+def normalize_extensions(
+    extensions: Sequence[tuple[int, bytes]] | None,
+) -> list[tuple[int, bytes]]:
     """Validate and coerce caller extensions to ``list[(int, bytes)]``.
 
     Accepts any iterable of ``(type, data)`` pairs (e.g. :class:`Extension`).
@@ -136,8 +139,8 @@ def next_redirect(
 
 
 def strip_body_headers(
-    headers: dict | None,
-) -> dict | None:
+    headers: Mapping[str, str] | None,
+) -> dict[str, str] | None:
     """Drop body-specific headers when a redirect downgrades a request to GET."""
     if not headers:
         return None
