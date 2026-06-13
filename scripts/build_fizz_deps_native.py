@@ -109,10 +109,22 @@ def main() -> None:
             ]
         )
 
-    # Fetch all sources first (recursive: pulls folly, boost, …) so folly can be
-    # patched before it compiles. Already-fetched repos are a no-op on a warm
-    # cache, and build below won't re-clone them.
-    run([sys.executable, getdeps, "--scratch-path", SCRATCH, "fetch", "fizz", *common])
+    # Fetch all sources first so folly can be patched before it compiles.
+    # --recursive is required: a bare `fetch fizz` clones only fizz, not its
+    # dependencies. build below skips re-fetching repos already at the pinned
+    # rev, so the patched working tree survives.
+    run(
+        [
+            sys.executable,
+            getdeps,
+            "--scratch-path",
+            SCRATCH,
+            "fetch",
+            "--recursive",
+            "fizz",
+            *common,
+        ]
+    )
     patch_folly_sse2()
 
     # getdeps skips deps already present in the (cached) scratch, so this is cheap
