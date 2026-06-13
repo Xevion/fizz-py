@@ -7,7 +7,7 @@ liboqs/libsodium once, installing into a gitignored prefix that `just build`
 then points `find_package(fizz)` at. Re-runs are a no-op unless --force.
 
 This is the fast local loop. The deterministic, distribution-oriented build is
-ci/build_fizz_deps.py (getdeps, static-PIC, inside manylinux). See BUILDING.md.
+scripts/build_fizz_deps.py (getdeps, static-PIC, inside manylinux). See BUILDING.md.
 
 Usage:
     python scripts/build_fizz.py ensure [--force]   # build if the prefix is stale

@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Builds folly + fizz + liboqs from source inside the manylinux container
-      # (see ci/build_fizz_deps.sh), so the dep tree is heavy: expect ~40 min on
+      # (see scripts/build_fizz_deps.py), so the dep tree is heavy: expect ~40 min on
       # a cold cache. liboqs travels with fizz's getdeps manifest, giving the
       # shipped wheel real post-quantum (X25519MLKEM768) support.
       - name: Build wheels

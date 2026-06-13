@@ -1,5 +1,5 @@
 # fizzpy dev tasks. `just build` is the fast local loop (editable _core against
-# a liboqs-enabled Fizz); CI wheels are built separately via ci/build_fizz_deps.py.
+# a liboqs-enabled Fizz); CI wheels are built separately via scripts/build_fizz_deps.py.
 
 _default:
     @just --list
@@ -8,6 +8,11 @@ _default:
 build:
     python scripts/build_fizz.py ensure
     pip install -e . --no-build-isolation --config-settings=build-dir=.dev/build-editable --config-settings=cmake.define.CMAKE_PREFIX_PATH="$(python scripts/build_fizz.py prefix-path)"
+
+# Build a non-editable wheel and force-reinstall it (full install, not the editable loop).
+wheel:
+    python -m build
+    pip install ./dist/*.whl --force-reinstall
 
 # Run the test suite. Defaults to the offline, deterministic subset; pass args to
 # override, e.g. `just test ""` for the full suite (needs network).
@@ -21,4 +26,4 @@ check:
 # Format Python and C++ in place.
 fmt:
     ruff format .
-    clang-format -i main.cpp
+    clang-format -i _core.cpp

@@ -27,10 +27,10 @@ set(PYBIND11_NEWPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(fizz CONFIG REQUIRED)
 
-pybind11_add_module(_core main.cpp)
+pybind11_add_module(_core _core.cpp)
 target_link_libraries(_core PRIVATE fizz::fizz)
 
-# main.cpp drives connections on a folly::ScopedEventBaseThread, but fizz itself
+# _core.cpp drives connections on a folly::ScopedEventBaseThread, but fizz itself
 # never uses that type — so when folly is a static archive (e.g. getdeps
 # --shared-lib portable wheels), its object never makes it into libfizz and the
 # symbol is undefined at import. Link the component directly when folly exposes
