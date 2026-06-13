@@ -53,7 +53,10 @@ endif()
 
 # pybind11 is pip-installed (locally, or by before-build in wheel builds); add its
 # CMake config so find_package locates it without a CIBW env substitution.
-find_package(Python COMPONENTS Interpreter QUIET)
+# Development.Module must be in this first find_package: pybind11's NewTools skips
+# its own Python discovery once Python_FOUND is set, so python_add_library (from
+# Development.Module) would otherwise never be defined.
+find_package(Python COMPONENTS Interpreter Development.Module QUIET)
 if(Python_Interpreter_FOUND)
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
