@@ -52,6 +52,32 @@ def run(cmd: list[str], **kwargs: object) -> None:
     subprocess.run(cmd, check=True, **kwargs)  # type: ignore[arg-type]
 
 
+def patch_folly_sse2() -> None:
+    """Keep folly's scalar crypto-math TU on SSE2 (macOS x86_64 only).
+
+    folly compiles MathOperation_Simple.cpp with -mno-sse2 as its no-SIMD
+    fallback. Harmless until now: the macOS 15 SDK's <math.h> declares _Float16
+    overloads unconditionally, and Apple Clang can't codegen _Float16 without
+    SSE2, so that TU dies with "_Float16 is not supported on this target". Every
+    x86_64 CPU has SSE2 (it's in the AMD64 ABI), so re-enabling it for the
+    fallback costs no portability. Only the _simple target carries -mno-sse2, so
+    a blind replace is safe.
+    """
+    if platform.system() != "Darwin" or platform.machine() != "x86_64":
+        return
+    pattern = "*folly*/folly/crypto/detail/CMakeLists.txt"
+    found = list(Path(SCRATCH, "repos").glob(pattern))
+    if not found:
+        print("warning: folly crypto/detail CMakeLists not found; skipping SSE2 patch")
+        return
+    for cml in found:
+        text = cml.read_text()
+        patched = text.replace("-mno-sse2", "-msse2")
+        if patched != text:
+            cml.write_text(patched)
+            print(f"patched {cml}: -mno-sse2 -> -msse2 (macOS 15 SDK _Float16)")
+
+
 def main() -> None:
     getdeps = str(FIZZ_SRC / "build" / "fbcode_builder" / "getdeps.py")
     common = [
@@ -82,6 +108,12 @@ def main() -> None:
                 str(FIZZ_SRC),
             ]
         )
+
+    # Fetch all sources first (recursive: pulls folly, boost, …) so folly can be
+    # patched before it compiles. Already-fetched repos are a no-op on a warm
+    # cache, and build below won't re-clone them.
+    run([sys.executable, getdeps, "--scratch-path", SCRATCH, "fetch", "fizz", *common])
+    patch_folly_sse2()
 
     # getdeps skips deps already present in the (cached) scratch, so this is cheap
     # on a warm cache and does the full build on a cold one.
@@ -116,14 +148,18 @@ def main() -> None:
         text=True,
         capture_output=True,
     ).stdout
-    prefix = ";".join(line for line in inst.splitlines() if line.strip())
+    # Forward slashes only: CMake treats backslashes as escapes when it splices
+    # these paths into generated TryCompile CMakeLists, so a Windows path like
+    # C:\fizz-src\...\CMake fails with "Invalid character escape '\f'".
+    prefix = ";".join(
+        line.replace("\\", "/") for line in inst.splitlines() if line.strip()
+    )
     (OUT / "prefix.txt").write_text(prefix + "\n")
 
     # fizz/folly use bundled find-modules (FindSodium, FindZstd, …) that live in
     # the fizz source tree rather than installed config packages.
-    (OUT / "module_dir.txt").write_text(
-        str(FIZZ_SRC / "build" / "fbcode_builder" / "CMake") + "\n"
-    )
+    module_dir = str(FIZZ_SRC / "build" / "fbcode_builder" / "CMake")
+    (OUT / "module_dir.txt").write_text(module_dir.replace("\\", "/") + "\n")
 
     print(f"fizz dependency tree ready; prefix written to {OUT / 'prefix.txt'}")
 

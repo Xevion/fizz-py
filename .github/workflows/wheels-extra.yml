@@ -48,8 +48,10 @@ jobs:
             echo "GETDEPS_SCRATCH=$HOME/fizz-deps"
             echo "FIZZPY_BUILD_INFO=$HOME/fizzpy-build"
             echo "FIZZ_SRC=$HOME/fizz-src"
-            # folly needs >= 10.13; this also tags the wheel macosx_11_0.
-            echo "MACOSX_DEPLOYMENT_TARGET=11.0"
+            # Match the runner's macOS major: getdeps pulls Homebrew libs (openssl,
+            # sodium, …) built for this OS, so the wheel can't claim an older target
+            # than they carry. Also satisfies folly's C++17 (>= 10.13) requirement.
+            echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d. -f1).0"
           } >> "$GITHUB_ENV"
 
       - name: Resolve deps paths and locate MSVC (windows)
@@ -75,7 +77,7 @@ jobs:
             ${{ env.GETDEPS_SCRATCH }}
             ${{ env.FIZZPY_BUILD_INFO }}
             ${{ env.FIZZ_SRC }}
-          key: deps-${{ matrix.os }}-${{ env.FIZZ_TAG }}-${{ hashFiles('scripts/build_fizz_deps_native.py') }}
+          key: deps-${{ matrix.os }}-${{ env.FIZZ_TAG }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/build_fizz_deps_native.py') }}
 
       - name: Debug session (tmate)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
