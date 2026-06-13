@@ -37,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # before-all runs on the host on macOS/Windows (no container), so these are
+      # inherited by the deps build and the _core configure without CIBW_ENVIRONMENT.
       - name: Resolve deps paths (unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -45,16 +47,22 @@ jobs:
             echo "GETDEPS_SCRATCH=$HOME/fizz-deps"
             echo "FIZZPY_BUILD_INFO=$HOME/fizzpy-build"
             echo "FIZZ_SRC=$HOME/fizz-src"
+            # folly needs >= 10.13; this also tags the wheel macosx_11_0.
+            echo "MACOSX_DEPLOYMENT_TARGET=11.0"
           } >> "$GITHUB_ENV"
 
-      - name: Resolve deps paths (windows)
+      - name: Resolve deps paths and locate MSVC (windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          install=$("$vswhere" -latest -property installationPath)
           {
             echo "GETDEPS_SCRATCH=C:/fizz-deps"
             echo "FIZZPY_BUILD_INFO=C:/fizzpy-build"
             echo "FIZZ_SRC=C:/fizz-src"
+            # getdeps only globs for VS 2022; point it at whatever VS is installed.
+            echo "VCVARS_PATH=$install\\VC\\Auxiliary\\Build\\vcvarsall.bat"
           } >> "$GITHUB_ENV"
 
       # The getdeps tree is the ~40-min cost; key it on the build script + tag so a
@@ -78,11 +86,6 @@ jobs:
         uses: pypa/cibuildwheel@v4.1.0
         env:
           CIBW_BUILD: cp312-*
-          CIBW_ENVIRONMENT: >-
-            FIZZ_TAG=${{ env.FIZZ_TAG }}
-            FIZZ_SRC=${{ env.FIZZ_SRC }}
-            GETDEPS_SCRATCH=${{ env.GETDEPS_SCRATCH }}
-            FIZZPY_BUILD_INFO=${{ env.FIZZPY_BUILD_INFO }}
 
       - uses: actions/upload-artifact@v7
         with:

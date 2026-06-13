@@ -17,7 +17,9 @@ Env (set by the workflow so the cache and CMake agree on locations):
 
 from __future__ import annotations
 
+import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -30,9 +32,19 @@ FIZZ_SRC = Path(os.environ["FIZZ_SRC"])
 SCRATCH = os.environ["GETDEPS_SCRATCH"]
 OUT = Path(os.environ["FIZZPY_BUILD_INFO"])
 
-# Static-PIC so _core links the tree in wholesale into one self-contained module,
-# matching the Linux build. PIC is a no-op on Windows but harmless to request.
-PIC_DEFINE = '{"CMAKE_POSITION_INDEPENDENT_CODE": "ON"}'
+
+def cmake_defines() -> str:
+    # Static-PIC so _core links the tree in wholesale into one self-contained
+    # module, matching the Linux build. PIC is a no-op on Windows but harmless.
+    defines = {"CMAKE_POSITION_INDEPENDENT_CODE": "ON"}
+    if platform.system() == "Darwin":
+        # folly's C++17 (aligned operator new, std::uncaught_exceptions) needs
+        # >= 10.13; without this getdeps defaults to 10.9 and folly fails to
+        # compile. Match the wheel's MACOSX_DEPLOYMENT_TARGET so ABI agrees.
+        defines["CMAKE_OSX_DEPLOYMENT_TARGET"] = os.environ.get(
+            "MACOSX_DEPLOYMENT_TARGET", "11.0"
+        )
+    return json.dumps(defines)
 
 
 def run(cmd: list[str], **kwargs: object) -> None:
@@ -44,10 +56,15 @@ def main() -> None:
     getdeps = str(FIZZ_SRC / "build" / "fbcode_builder" / "getdeps.py")
     common = [
         "--extra-cmake-defines",
-        PIC_DEFINE,
+        cmake_defines(),
         f"--src-dir={FIZZ_SRC}",
         "--allow-system-packages",
     ]
+    # getdeps only autodetects Visual Studio 2022; newer VS on the runner needs an
+    # explicit pointer to vcvarsall.bat (located via vswhere in the workflow).
+    vcvars = os.environ.get("VCVARS_PATH")
+    if vcvars:
+        common += ["--vcvars-path", vcvars]
 
     # A cache restore brings back the clone; only fetch when it's genuinely absent.
     if not (FIZZ_SRC / ".git").exists():
