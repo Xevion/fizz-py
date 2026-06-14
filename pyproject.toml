@@ -144,3 +144,7 @@ repair-wheel-command = "DYLD_LIBRARY_PATH=\"$(echo $GETDEPS_SCRATCH/installed/*/
 archs = ["AMD64"]
 before-all = "python scripts/build_fizz_deps_native.py"
 before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
+# glog/gflags export as shared libs, so _core.pyd needs glog.dll at load time.
+# delvewheel only searches PATH; point it at the getdeps install dirs so it can
+# find and vendor them (the Windows analogue of the LD/DYLD path injection above).
+repair-wheel-command = "python scripts/repair_wheel_windows.py {dest_dir} {wheel}"
