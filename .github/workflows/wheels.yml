@@ -12,6 +12,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # macOS/Windows build fizz from source at this tag; keep it matching the tag the
+  # Linux deps image pins (scripts/build_fizz_deps.py) so every platform ships the
+  # same fizz. The Linux jobs read their pin from the image, not this var.
+  FIZZ_TAG: v2026.06.08.00
+
 jobs:
   # The folly+fizz+liboqs tree is baked into a GHCR image tagged by the hash of
   # its build inputs. This job rebuilds it only when that hash has no image yet
@@ -114,5 +120,74 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.python }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  build_wheels_native:
+    # macOS and Windows have no prebuilt deps image, so each runner builds the
+    # folly+fizz+liboqs tree from source (cached). Skipped on PRs — PR feedback
+    # stays on the fast Linux path; these run on master, tags, and dispatch.
+    name: Wheel ${{ matrix.os }}
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel = x86_64, macos-14 = arm64 (native per runner). windows-2022
+        # ships VS 2022 (vc143); windows-latest moved to VS 2026, whose toolset Boost
+        # 1.83's bootstrap doesn't recognize. Interpreters (cp310-cp314) come from
+        # [tool.cibuildwheel] build in pyproject.toml.
+        os: [macos-15-intel, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+
+      # before-all runs on the host on macOS/Windows (no container), so these are
+      # inherited by the deps build and the _core configure without CIBW_ENVIRONMENT.
+      - name: Resolve deps paths (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "GETDEPS_SCRATCH=$HOME/fizz-deps"
+            echo "FIZZPY_BUILD_INFO=$HOME/fizzpy-build"
+            echo "FIZZ_SRC=$HOME/fizz-src"
+            # Match the runner's macOS major: getdeps pulls Homebrew libs (openssl,
+            # sodium, …) built for this OS, so the wheel can't claim an older target
+            # than they carry. Also satisfies folly's C++17 (>= 10.13) requirement.
+            echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d. -f1).0"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve deps paths and locate MSVC (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          install=$("$vswhere" -latest -property installationPath)
+          {
+            echo "GETDEPS_SCRATCH=C:/fizz-deps"
+            echo "FIZZPY_BUILD_INFO=C:/fizzpy-build"
+            echo "FIZZ_SRC=C:/fizz-src"
+            # getdeps only globs for VS 2022; point it at whatever VS is installed.
+            echo "VCVARS_PATH=$install\\VC\\Auxiliary\\Build\\vcvarsall.bat"
+          } >> "$GITHUB_ENV"
+
+      # The getdeps tree is the ~40-min cost; key it on the build script + tag so a
+      # warm cache turns before-all into a near no-op.
+      - name: Cache deps tree
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GETDEPS_SCRATCH }}
+            ${{ env.FIZZPY_BUILD_INFO }}
+            ${{ env.FIZZ_SRC }}
+          key: deps-${{ matrix.os }}-${{ env.FIZZ_TAG }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/build_fizz_deps_native.py') }}
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v4.1.0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
           if-no-files-found: error
