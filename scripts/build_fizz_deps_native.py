@@ -53,15 +53,14 @@ def run(cmd: list[str], **kwargs: object) -> None:
 
 
 def patch_folly_sse2() -> None:
-    """Keep folly's scalar crypto-math TU on SSE2 (macOS x86_64 only).
+    """Re-enable SSE2 on folly's scalar crypto-math TU (macOS x86_64 only).
 
-    folly compiles MathOperation_Simple.cpp with -mno-sse2 as its no-SIMD
-    fallback. Harmless until now: the macOS 15 SDK's <math.h> declares _Float16
-    overloads unconditionally, and Apple Clang can't codegen _Float16 without
-    SSE2, so that TU dies with "_Float16 is not supported on this target". Every
-    x86_64 CPU has SSE2 (it's in the AMD64 ABI), so re-enabling it for the
-    fallback costs no portability. Only the _simple target carries -mno-sse2, so
-    a blind replace is safe.
+    folly builds MathOperation_Simple.cpp with -mno-sse2, but the macOS 15 SDK's
+    <math.h> declares _Float16 unconditionally and Apple Clang can't codegen it
+    without SSE2 ("_Float16 is not supported on this target"). Every x86_64 CPU has
+    SSE2, so flipping the flag is safe; only the _simple target carries -mno-sse2.
+    A getdeps CMAKE_CXX_FLAGS=-msse2 can't fix it: folly's per-target flag is
+    appended after global flags and Clang takes the last -m, so we edit the source.
     """
     if platform.system() != "Darwin" or platform.machine() != "x86_64":
         return
