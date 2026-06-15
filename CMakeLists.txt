@@ -85,12 +85,12 @@ if(TARGET Folly::folly_io_async_scoped_event_base_thread)
   target_link_libraries(_core PRIVATE Folly::folly_io_async_scoped_event_base_thread)
 endif()
 
-# The statically-linked deps reference Windows system libraries that their
-# getdeps configs don't propagate as interface links: libevent's evutil_rand
-# pulls BCryptGenRandom from bcrypt, and folly/openssl want the usual socket,
-# cert-store, and IP-helper imports. Link them on the consumer.
+# Static deps need Windows system libs their getdeps configs don't propagate as
+# interface links: bcrypt (RNG: libevent, liboqs), crypt32 (OpenSSL cert store),
+# ws2_32 (sockets), iphlpapi (folly GetAdaptersAddresses), advapi32 (OpenSSL/
+# libevent registry + RNG fallback). Link them on the consumer.
 if(WIN32)
-  target_link_libraries(_core PRIVATE bcrypt crypt32 ws2_32 iphlpapi)
+  target_link_libraries(_core PRIVATE bcrypt crypt32 ws2_32 iphlpapi advapi32)
 endif()
 
 install(TARGETS _core LIBRARY DESTINATION fizzpy)

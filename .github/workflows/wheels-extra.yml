@@ -32,8 +32,8 @@ jobs:
       matrix:
         # macos-15-intel = x86_64, macos-14 = arm64 (native per runner). windows-2022
         # ships VS 2022 (vc143); windows-latest moved to VS 2026, whose toolset Boost
-        # 1.83's bootstrap doesn't recognize. One interpreter while bringing the build
-        # up; fan out cp310-cp314 per platform once it is green.
+        # 1.83's bootstrap doesn't recognize. Interpreters (cp310-cp314) come from
+        # [tool.cibuildwheel] build in pyproject.toml.
         os: [macos-15-intel, macos-14, windows-2022]
     steps:
       - uses: actions/checkout@v6
@@ -87,8 +87,6 @@ jobs:
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.0
-        env:
-          CIBW_BUILD: cp312-*
 
       - uses: actions/upload-artifact@v7
         with:
