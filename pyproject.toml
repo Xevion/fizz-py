@@ -108,6 +108,9 @@ wheel.packages = ["fizzpy"]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-frontend = { name = "pip", args = ["--no-build-isolation"] }
+# --no-build-isolation skips auto-installing the build backend, so install it here.
+# Identical on every platform, so it lives at the top level.
+before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
@@ -115,7 +118,6 @@ archs = ["x86_64"]
 # before-all — each build just compiles _core against the baked prefix CMake
 # reads from $FIZZPY_BUILD_INFO. CI sets the image ref (content-addressed, owner
 # resolved at runtime) via CIBW_MANYLINUX_X86_64_IMAGE in wheels.yml.
-before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 # The getdeps tree builds glog/gflags (and on Windows openssl/libsodium) as shared
 # libs in install dirs outside the loader's default search path, so _core has a
 # runtime dependency the default repair command can't resolve. Each platform below
@@ -128,11 +130,10 @@ repair-wheel-command = "LD_LIBRARY_PATH=\"$(echo /opt/fizz-deps/installed/*/lib 
 FIZZPY_BUILD_INFO = "/opt/fizzpy-build"
 
 # macOS/Windows have no prebuilt deps image, so before-all builds the folly+fizz+
-# liboqs tree on the runner. wheels-extra.yml supplies FIZZ_SRC/GETDEPS_SCRATCH/
+# liboqs tree on the runner. wheels.yml supplies FIZZ_SRC/GETDEPS_SCRATCH/
 # FIZZPY_BUILD_INFO per-runner and caches the scratch dir.
 [tool.cibuildwheel.macos]
 before-all = "python3 scripts/build_fizz_deps_native.py"
-before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 # delocate reads only DYLD_*. Set it inline: macOS SIP strips DYLD_* from the
 # system shell's env, but not vars that shell sets for its own children.
 repair-wheel-command = "DYLD_LIBRARY_PATH=\"$(echo $GETDEPS_SCRATCH/installed/*/lib | tr ' ' ':')\" delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
@@ -142,7 +143,6 @@ repair-wheel-command = "DYLD_LIBRARY_PATH=\"$(echo $GETDEPS_SCRATCH/installed/*/
 # build can't link it. delvewheel vendors the runtime DLLs into the wheel.
 archs = ["AMD64"]
 before-all = "python scripts/build_fizz_deps_native.py"
-before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
 # delvewheel searches only PATH; --add-path feeds it the getdeps dirs. Their names
 # are content-addressed (hashed), so a shim globs them rather than a fixed path.
 repair-wheel-command = "python scripts/repair_wheel_windows.py {dest_dir} {wheel}"
