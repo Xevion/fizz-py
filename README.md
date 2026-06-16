@@ -11,7 +11,7 @@ back to classical X25519 against those that don't.
 > TLS 1.3 only, HTTP/1.1 only. This is a focused toolkit / learning project,
 > not a drop-in `requests` replacement. See [Status](#status).
 
-![A fizzpy ClientHello in Wireshark](docs/pq-handshake.png)
+![A fizzpy ClientHello in Wireshark](https://raw.githubusercontent.com/Xevion/fizz-py/master/docs/pq-handshake.png)
 
 *A fizzpy request captured in Wireshark: the TLS 1.3 ClientHello offers the
 post-quantum `X25519MLKEM768` group (`0x11ec`), and a custom marker extension

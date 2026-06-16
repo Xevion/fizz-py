@@ -7,15 +7,15 @@ project(
   VERSION ${SKBUILD_PROJECT_VERSION}
   LANGUAGES CXX)
 
-# Only Linux x86_64 wheels are published. Stop here before the (~40 min) folly +
-# fizz + liboqs source build that an sdist install would otherwise attempt and
-# fail on macOS/Windows.
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Wheels target Linux, macOS, and Windows. Other platforms stop here before the
+# (~40 min) folly + fizz + liboqs source build an sdist install would attempt.
+if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin|Windows)$")
   message(
     FATAL_ERROR
-    "fizzpy publishes prebuilt Linux x86_64 wheels only; ${CMAKE_SYSTEM_NAME} "
-    "is not yet supported. Building from source needs the Fizz toolchain — see "
-    "BUILDING.md (https://github.com/Xevion/fizz-py/blob/master/BUILDING.md).")
+    "fizzpy publishes prebuilt wheels for Linux, macOS, and Windows; "
+    "${CMAKE_SYSTEM_NAME} is not supported. Building from source needs the Fizz "
+    "toolchain — see BUILDING.md "
+    "(https://github.com/Xevion/fizz-py/blob/master/BUILDING.md).")
 endif()
 
 # Fizz's CMake config pulls in its bundled FindSodium.cmake. Homebrew installs
@@ -83,6 +83,14 @@ target_link_libraries(_core PRIVATE fizz::fizz)
 # libfolly already and skip this.
 if(TARGET Folly::folly_io_async_scoped_event_base_thread)
   target_link_libraries(_core PRIVATE Folly::folly_io_async_scoped_event_base_thread)
+endif()
+
+# Static deps need Windows system libs their getdeps configs don't propagate as
+# interface links: bcrypt (RNG: libevent, liboqs), crypt32 (OpenSSL cert store),
+# ws2_32 (sockets), iphlpapi (folly GetAdaptersAddresses), advapi32 (OpenSSL/
+# libevent registry + RNG fallback). Link them on the consumer.
+if(WIN32)
+  target_link_libraries(_core PRIVATE bcrypt crypt32 ws2_32 iphlpapi advapi32)
 endif()
 
 install(TARGETS _core LIBRARY DESTINATION fizzpy)
