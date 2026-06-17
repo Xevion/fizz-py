@@ -96,6 +96,40 @@ Verification follows requests' own `verify=` argument: `verify="/path/ca.pem"`
 trusts a specific CA, `verify=False` disables it. Hostname checking happens
 inside the Fizz handshake.
 
+### httpx
+
+`FizzHTTPTransport` is an `httpx` transport (install the extra:
+`pip install fizzpy[httpx]`). Hand it to `httpx.Client(transport=...)` and httpx
+keeps cookies, redirects, pooling, and its request/response models while Fizz
+does the handshake.
+
+```python
+import httpx
+from fizzpy import TlsConfig, NamedGroup
+from fizzpy.contrib.httpx import FizzHTTPTransport
+
+client = httpx.Client(transport=FizzHTTPTransport())
+
+r = client.get("https://www.cloudflare.com")
+print(r.status_code)   # 200
+
+# The negotiated handshake is on the TlsSocket; stream to keep it reachable:
+with client.stream("GET", "https://www.cloudflare.com") as r:
+    sock = r.extensions["network_stream"].get_extra_info("socket")
+    print(sock.tls["group_code"])  # 4588
+
+# Shape the handshake with a TlsConfig:
+client = httpx.Client(transport=FizzHTTPTransport(
+    TlsConfig(groups=[NamedGroup.x25519_mlkem768])
+))
+```
+
+Unlike the requests adapter, TLS is configured via `TlsConfig`, **not** httpx's
+`verify=`. httpx has no separate `ssl_context` parameter, so fizzpy must occupy
+the `verify=` slot to install itself — meaning httpx's own `verify=`/`cert=`
+can't also be honored. `FizzHTTPTransport` rejects them (and `http2=True`, which
+it can't support) with a clear error rather than silently ignoring them.
+
 ### Any socket: `wrap_socket`
 
 The adapter is built on a single primitive — hand fizzpy an already-connected
@@ -223,8 +257,9 @@ fizzpy.Client(verify=False)               # accept any certificate (insecure)
 
 What works today:
 
-- **Pluggable TLS** under `requests`/urllib3 via `FizzAdapter`, and under any
-  client that accepts a socket via `wrap_socket`
+- **Pluggable TLS** under `requests`/urllib3 via `FizzAdapter`, under `httpx`
+  via `FizzHTTPTransport`, and under any client that accepts a socket via
+  `wrap_socket`
 - TLS 1.3 handshake with classical or post-quantum (ML-KEM) key exchange
 - Built-in client: `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
 - HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
@@ -237,8 +272,9 @@ Current limitations:
   If you need to reach TLS 1.2 endpoints, keep your client's default `ssl` path
   for those hosts and mount `FizzAdapter` only where TLS 1.3 is guaranteed.
 - HTTP/1.1 only (no HTTP/2)
-- requests/urllib3 is the only packaged adapter so far; httpx and aiohttp can be
-  built on the same `wrap_socket` primitive
+- Packaged adapters: requests/urllib3 and httpx (sync). An async httpx transport
+  and an aiohttp connector can be built on the same `wrap_socket` primitive but
+  aren't shipped yet
 - No client certificates (mutual TLS) yet; CA trust is a single bundle file
   (no `capath`/`cadata`)
 

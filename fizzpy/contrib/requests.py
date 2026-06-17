@@ -36,68 +36,15 @@ the TCP connection and connection management; fizzpy owns only the handshake.
 # pyright: reportMissingModuleSource=false, reportUnknownMemberType=false
 from __future__ import annotations
 
-import ssl
-from dataclasses import replace
 from typing import Any
 
 from requests.adapters import HTTPAdapter
 
-from fizzpy._tls import TlsConfig, TlsSocket, wrap_socket
+from fizzpy._tls import TlsConfig
 
-__all__ = ["FizzAdapter", "FizzSSLContext"]
+from ._context import FizzSSLContext
 
-
-class FizzSSLContext:
-    """An ``ssl.SSLContext`` look-alike that wraps sockets with Fizz.
-
-    Implements just the surface urllib3 drives: it accepts ``verify_mode`` /
-    ``check_hostname`` assignments, records the CA file from
-    ``load_verify_locations`` and the protocols from ``set_alpn_protocols``, and
-    performs the handshake in :meth:`wrap_socket`. ``check_hostname`` defaults to
-    ``True`` so urllib3 trusts fizzpy's in-handshake hostname check and skips its
-    own ``getpeercert()`` matching (which a :class:`TlsSocket` does not provide).
-    """
-
-    def __init__(self, config: TlsConfig | None = None) -> None:
-        self._config = config or TlsConfig()
-        self._cafile = self._config.cafile
-        self._alpn: list[str] = list(self._config.alpn)
-        # urllib3 overwrites these from the request's verify settings.
-        self.check_hostname = True
-        self.verify_mode = ssl.CERT_REQUIRED
-
-    def load_verify_locations(
-        self,
-        cafile: str | None = None,
-        capath: str | None = None,
-        cadata: str | bytes | None = None,
-    ) -> None:
-        if capath or cadata:
-            raise NotImplementedError(
-                "fizzpy trusts a single CA bundle file; capath/cadata are "
-                "unsupported. Point requests at a cafile (verify='/path/ca.pem')."
-            )
-        if cafile:
-            self._cafile = cafile
-
-    def set_alpn_protocols(self, protocols: list[str]) -> None:
-        self._alpn = list(protocols)
-
-    def load_cert_chain(self, *args: object, **kwargs: object) -> None:
-        raise NotImplementedError(
-            "fizzpy does not support client certificates (mutual TLS) yet"
-        )
-
-    def wrap_socket(
-        self, sock: Any, server_hostname: str | None = None, **_kwargs: object
-    ) -> TlsSocket:
-        config = replace(
-            self._config,
-            verify=self.verify_mode != ssl.CERT_NONE,
-            cafile=self._cafile,
-            alpn=self._alpn,
-        )
-        return wrap_socket(sock, server_hostname or "", config)
+__all__ = ["FizzAdapter"]
 
 
 class FizzAdapter(HTTPAdapter):

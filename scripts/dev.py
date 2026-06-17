@@ -49,6 +49,7 @@ BUILD_DEPS = [
     "certifi",
     "pytest",
     "requests",
+    "httpx",
 ]
 
 # Container-side shell that derives the build/runtime paths from the getdeps tree

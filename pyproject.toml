@@ -32,9 +32,12 @@ Repository = "https://github.com/Xevion/fizz-py"
 Issues = "https://github.com/Xevion/fizz-py/issues"
 
 # `dev` typechecks against the committed _core.pyi, so CI never builds the
-# native extension to lint: `uv sync --no-install-project --group dev`.
+# native extension to lint: `uv sync --no-install-project --group dev`. httpx is
+# here (not just the optional extra) so its py.typed types resolve when checking
+# fizzpy.contrib.httpx; requests stays out — it's untyped, so its adapter relies
+# on a file-level pyright relaxation instead.
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.15", "basedpyright>=1.39"]
+dev = ["pytest>=8", "ruff>=0.15", "basedpyright>=1.39", "httpx"]
 build = ["scikit-build-core", "pybind11>=2.13", "pybind11-stubgen"]
 
 [project.optional-dependencies]
@@ -42,6 +45,8 @@ test = ["pytest>=8"]
 # The requests/urllib3 adapter (fizzpy.contrib.requests). Core fizzpy never
 # imports requests; the adapter pulls it in only when you opt into this extra.
 requests = ["requests"]
+# The httpx transport (fizzpy.contrib.httpx); likewise opt-in.
+httpx = ["httpx"]
 
 [tool.ruff]
 target-version = "py310"
