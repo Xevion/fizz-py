@@ -5,16 +5,47 @@ handshake additionally requires a Fizz built against
 [liboqs](https://github.com/open-quantum-safe/liboqs) — the Homebrew bottle and
 vcpkg port both ship `FIZZ_HAVE_OQS=0`, so they negotiate classical groups only.
 
-There are two build paths, for two different purposes:
+There are three build paths, for three different purposes:
 
-| | Local dev (`just build`) | CI wheels (`scripts/build_fizz_deps.py`) |
-| --- | --- | --- |
-| Fizz/liboqs source | Homebrew + from-source Fizz | getdeps, all from source |
-| Linkage | static Fizz, shared liboqs via rpath | fully static-PIC, self-contained `.so` |
-| Where | your machine | `manylinux_2_28` container |
-| Optimized for | fast iteration | deterministic, portable distribution |
+| | Container dev (`just dev-build`) | Homebrew dev (`just build`) | CI wheels (`scripts/build_fizz_deps.py`) |
+| --- | --- | --- | --- |
+| Fizz/liboqs source | getdeps tree in `.dev/getdeps` | Homebrew + from-source Fizz | getdeps, all from source |
+| Linkage | static, against the CI tree | static Fizz, shared liboqs via rpath | fully static-PIC, self-contained `.so` |
+| Where | `manylinux_2_28` container | your machine | `manylinux_2_28` container |
+| Optimized for | "builds here == builds in CI" | fastest iteration | deterministic, portable distribution |
 
-## Local development (`just`)
+## Container development (`just dev-*`) — recommended
+
+The Homebrew loop links `_core` against Homebrew's *shared* folly, so a Homebrew
+folly bump (now compiled for a newer glibc than many hosts) silently breaks every
+local build. The container loop sidesteps that: it builds and runs `_core` inside
+the same `manylinux_2_28` image the wheels use, against the prebuilt static
+folly + Fizz + liboqs tree in `.dev/getdeps`. "Builds locally" and "builds in CI"
+become the same statement.
+
+```sh
+just dev-up         # create/start the container + one-time system + pip setup
+just dev-build      # editable-build _core against the getdeps tree (~10s inner loop)
+just dev-test       # offline suite; `just dev-test "-- -m network"` runs live-network tests
+just dev-shell      # interactive bash inside the container
+just dev-down       # stop + remove the container
+```
+
+The trick that needs no path rewriting: the getdeps tree bakes absolute
+`/project/...` paths into its CMake configs (it was built at `/project`), so the
+repo is bind-mounted at `/project` inside the container and every baked path
+resolves. A persistent container plus `docker exec` keeps the inner loop fast
+(no per-change `docker run`/image build).
+
+This requires the `.dev/getdeps` tree on disk (gitignored). Rebuild it inside the
+image with `scripts/build_fizz_deps.py` if it's missing (~40 min, one-time). The
+orchestration lives in `scripts/dev.py`.
+
+## Homebrew development (`just build`) — fastest, host-dependent
+
+Fast iteration when your host glibc is new enough for the current Homebrew folly
+bottle. If `import fizzpy` fails with a `GLIBC_2.xx not found` error, your host is
+too old — use the container loop above.
 
 ```sh
 brew install fizz liboqs    # fizz pulls folly, boost, glog, gflags, libsodium, double-conversion

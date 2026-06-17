@@ -1,8 +1,11 @@
-"""fizzpy — a low-level TLS 1.3 client toolkit built on Facebook's Fizz.
+"""fizzpy — post-quantum TLS 1.3 for Python, built on Facebook's Fizz.
 
-The synchronous facade lives here; the asyncio facade is :mod:`fizzpy.aio`.
-Both drive the same C++ core, which runs every connection on a background
-EventBase thread.
+Two ways to use it. Plug Fizz under an HTTP client you already have — mount
+:class:`fizzpy.contrib.requests.FizzAdapter` on a ``requests.Session``, or wrap
+any connected socket with :func:`fizzpy.wrap_socket` — and keep that client's
+cookies, redirects, and pooling while Fizz does the handshake. Or use the small
+built-in client (this module, sync) / :mod:`fizzpy.aio` (async); both drive the
+same C++ core, which runs every connection on a background EventBase thread.
 
     import fizzpy
 
@@ -38,6 +41,7 @@ from ._common import (
 )
 from ._core import NamedGroup
 from ._http import Headers, Response, ResponseParser, build_request
+from ._tls import TlsConfig, TlsSocket, wrap_socket
 from ._transport import run_sync
 
 __all__ = [
@@ -46,7 +50,9 @@ __all__ = [
     "Headers",
     "NamedGroup",
     "Response",
+    "TlsConfig",
     "TlsParameters",
+    "TlsSocket",
     "TooManyRedirects",
     "delete",
     "get",
@@ -54,6 +60,7 @@ __all__ = [
     "post",
     "put",
     "request",
+    "wrap_socket",
 ]
 
 # Negotiated parameters are returned from the core as a plain dict; expose the

@@ -19,6 +19,29 @@ wheel:
 test *args="-m 'not network'":
     pytest {{args}}
 
+# Containerized dev loop (recommended): build + test inside the manylinux image
+# the wheels use, against the prebuilt .dev/getdeps tree. Isolated from host
+# Homebrew/glibc drift. See scripts/dev.py.
+dev-up:
+    python scripts/dev.py up
+
+# Editable-build _core in the container (the ~10s inner loop).
+dev-build:
+    python scripts/dev.py build
+
+# Run the suite in the container. `just dev-test "-- -m network"` runs the
+# live-network tests; pass any other pytest args after a `--` the same way.
+dev-test *args:
+    python scripts/dev.py test {{args}}
+
+# Interactive shell inside the dev container.
+dev-shell:
+    python scripts/dev.py shell
+
+# Stop + remove the dev container.
+dev-down:
+    python scripts/dev.py down
+
 # Install the lint/type toolchain into .venv without building _core.
 _tools:
     uv sync --no-install-project --group dev

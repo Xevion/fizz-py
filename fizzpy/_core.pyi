@@ -101,6 +101,19 @@ class TlsConnection:
         resolve: Callable[[None], None],
         reject: Callable[[BaseException], None],
     ) -> None: ...
+    def wrap_fd(
+        self,
+        fd: int,
+        sni: str,
+        alpns: list[str],
+        groups: list[NamedGroup],
+        verify: bool,
+        ca_file: str,
+        timeout_ms: int,
+        extensions: list[tuple[int, bytes]],
+        resolve: Callable[[None], None],
+        reject: Callable[[BaseException], None],
+    ) -> None: ...
     def write(
         self,
         data: bytes,

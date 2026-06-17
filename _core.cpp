@@ -10,8 +10,11 @@
 
 #include <folly/SocketAddress.h>
 #include <folly/io/IOBuf.h>
+#include <folly/io/async/AsyncSocket.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
+#include <folly/net/NetOps.h>
+#include <folly/net/NetworkSocket.h>
 #include <folly/ssl/OpenSSLPtrTypes.h>
 
 #include <openssl/x509.h>
@@ -229,64 +232,95 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
                                 extsPtr,
                                 promise]() mutable {
       try {
-        auto ctx = std::make_shared<fizz::client::FizzClientContext>();
-        if (!alpnsPtr->empty()) {
-          ctx->setSupportedAlpns(*alpnsPtr);
-        }
-        if (!groupsPtr->empty()) {
-          // Restrict both the advertised groups and the key shares we actually
-          // send, so a caller can force a specific (e.g. post-quantum) share.
-          ctx->setSupportedGroups(*groupsPtr);
-          ctx->setDefaultShares(*groupsPtr);
-        }
-
-        std::shared_ptr<const fizz::CertificateVerifier> verifier;
-        if (verify) {
-          fizz::Error err;
-          std::unique_ptr<fizz::DefaultCertificateVerifier> v;
-          auto st = caFile.empty()
-              ? fizz::DefaultCertificateVerifier::create(
-                    v, err, fizz::VerificationContext::Client, nullptr)
-              : fizz::DefaultCertificateVerifier::createFromCAFile(
-                    v, err, fizz::VerificationContext::Client, caFile);
-          if (st != fizz::Status::Success || !v) {
-            rejectOnLoop(promise, "failed to build certificate verifier");
-            return;
-          }
-          std::shared_ptr<const fizz::CertificateVerifier> chain = std::move(v);
-          verifier = std::make_shared<HostnameVerifier>(chain, sni);
-        } else {
-          verifier = std::make_shared<fizz::InsecureAcceptAnyCertificate>();
-        }
-
-        std::shared_ptr<fizz::ClientExtensions> clientExts;
-        if (!extsPtr->empty()) {
-          std::vector<fizz::Extension> fexts;
-          fexts.reserve(extsPtr->size());
-          for (const auto& [type, data] : *extsPtr) {
-            fizz::Extension ext;
-            ext.extension_type = static_cast<fizz::ExtensionType>(type);
-            ext.extension_data = folly::IOBuf::copyBuffer(data);
-            fexts.push_back(std::move(ext));
-          }
-          clientExts = std::make_shared<PyClientExtensions>(std::move(fexts));
-        }
+        auto setup =
+            buildSetup(*alpnsPtr, *groupsPtr, verify, caFile, sni, *extsPtr);
 
         client_ = fizz::client::AsyncFizzClient::UniquePtr(
-            new fizz::client::AsyncFizzClient(evb_, ctx, clientExts));
+            new fizz::client::AsyncFizzClient(
+                evb_, setup.ctx, setup.clientExts));
 
         folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
         auto* cb = new ConnectCb(this, promise);
         client_->connect(
             addr,
             cb,
-            verifier,
+            setup.verifier,
             folly::Optional<std::string>(sni),
             folly::Optional<std::string>(),
             std::chrono::milliseconds(timeoutMs),
             std::chrono::milliseconds(timeoutMs));
       } catch (const std::exception& e) {
         rejectOnLoop(promise, std::string("connect failed: ") + e.what());
+      }
+    });
+  }
+
+  // Perform the TLS handshake over an already-connected socket the caller
+  // supplies as a file descriptor (e.g. a TCP socket opened by an HTTP client).
+  // This is the seam that lets fizzpy slot under requests/httpx/aiohttp: they
+  // own connection management; we own only the TLS layer. Takes ownership of the
+  // fd (the adopted AsyncSocket closes it on teardown), so callers pass a dup.
+  // Resolves with None on handshake success, rejects with ConnectionError.
+  void wrapFd(
+      int fd,
+      const std::string& sni,
+      std::vector<std::string> alpns,
+      std::vector<fizz::NamedGroup> groups,
+      bool verify,
+      const std::string& caFile,
+      uint32_t timeoutMs,
+      std::vector<std::pair<uint16_t, std::string>> extensions,
+      py::function resolve,
+      py::function reject) {
+    auto promise = std::make_shared<Promise>(
+        Promise{std::move(resolve), std::move(reject)});
+    auto alpnsPtr = std::make_shared<std::vector<std::string>>(std::move(alpns));
+    auto groupsPtr =
+        std::make_shared<std::vector<fizz::NamedGroup>>(std::move(groups));
+    auto extsPtr =
+        std::make_shared<std::vector<std::pair<uint16_t, std::string>>>(
+            std::move(extensions));
+
+    evb_->runInEventBaseThread([this,
+                                fd,
+                                sni,
+                                alpnsPtr,
+                                groupsPtr,
+                                verify,
+                                caFile,
+                                timeoutMs,
+                                extsPtr,
+                                promise]() mutable {
+      // Adopt the caller's connected fd into a folly AsyncSocket first, so this
+      // method owns the fd on every path: if anything below throws, `sock`
+      // (or client_) destructs and closes it. The caller hands us a dup and
+      // never closes it itself, which keeps ownership single and unambiguous.
+      folly::AsyncSocket::UniquePtr sock;
+      try {
+        sock = folly::AsyncSocket::newSocket(
+            evb_, folly::NetworkSocket::fromFd(fd));
+      } catch (const std::exception& e) {
+        folly::netops::close(folly::NetworkSocket::fromFd(fd));
+        rejectOnLoop(promise, std::string("wrap failed: ") + e.what());
+        return;
+      }
+      try {
+        auto setup =
+            buildSetup(*alpnsPtr, *groupsPtr, verify, caFile, sni, *extsPtr);
+        client_ = fizz::client::AsyncFizzClient::UniquePtr(
+            new fizz::client::AsyncFizzClient(
+                std::move(sock), setup.ctx, setup.clientExts));
+
+        auto* cb = new HandshakeCb(this, promise);
+        client_->connect(
+            cb,
+            setup.verifier,
+            folly::Optional<std::string>(sni),
+            folly::Optional<std::string>(),
+            folly::none,
+            std::chrono::milliseconds(timeoutMs));
+      } catch (const std::exception& e) {
+        rejectOnLoop(promise, std::string("wrap failed: ") + e.what());
       }
     });
   }
@@ -424,6 +458,38 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     }
   };
 
+  // Per-handshake callback for the adopt-an-fd path (wrapFd). Mirrors ConnectCb,
+  // but implements Fizz's HandshakeCallback since the transport is already
+  // connected (no ConnectCallback::connectSuccess to hang the handshake off).
+  struct HandshakeCb : public fizz::client::AsyncFizzClient::HandshakeCallback {
+    TlsConnection* conn;
+    std::shared_ptr<Promise> promise;
+    HandshakeCb(TlsConnection* c, std::shared_ptr<Promise> p)
+        : conn(c), promise(std::move(p)) {}
+
+    void fizzHandshakeSuccess(
+        fizz::client::AsyncFizzClient* /*client*/) noexcept override {
+      conn->captureNegotiated();
+      conn->client_->setReadCB(conn);
+      py::gil_scoped_acquire gil;
+      auto resolve = std::move(promise->resolve);
+      promise.reset();
+      resolve(py::none());
+      delete this;
+    }
+
+    void fizzHandshakeError(
+        fizz::client::AsyncFizzClient* /*client*/,
+        folly::exception_wrapper ex) noexcept override {
+      py::gil_scoped_acquire gil;
+      auto reject = std::move(promise->reject);
+      promise.reset();
+      reject(makeError(
+          std::string("handshake failed: ") + ex.what().toStdString()));
+      delete this;
+    }
+  };
+
   struct WriteCb : public folly::AsyncTransportWrapper::WriteCallback {
     std::shared_ptr<Promise> promise;
     explicit WriteCb(std::shared_ptr<Promise> p) : promise(std::move(p)) {}
@@ -466,6 +532,68 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     if (const auto* cert = client_->getPeerCertificate()) {
       negPeerCert_ = cert->getIdentity();
     }
+  }
+
+  // Bundle of per-connection Fizz objects shared by the connect() and wrapFd()
+  // paths: the client context (ALPN/groups), the certificate verifier (chain +
+  // hostname, or insecure), and any caller ClientHello extensions.
+  struct Setup {
+    std::shared_ptr<fizz::client::FizzClientContext> ctx;
+    std::shared_ptr<const fizz::CertificateVerifier> verifier;
+    std::shared_ptr<fizz::ClientExtensions> clientExts;
+  };
+
+  // Build the per-connection Fizz objects on the loop thread. Throws
+  // std::runtime_error if the verifier can't be constructed (the caller catches
+  // it and rejects the promise).
+  Setup buildSetup(
+      const std::vector<std::string>& alpns,
+      const std::vector<fizz::NamedGroup>& groups,
+      bool verify,
+      const std::string& caFile,
+      const std::string& sni,
+      const std::vector<std::pair<uint16_t, std::string>>& exts) {
+    Setup s;
+    s.ctx = std::make_shared<fizz::client::FizzClientContext>();
+    if (!alpns.empty()) {
+      s.ctx->setSupportedAlpns(alpns);
+    }
+    if (!groups.empty()) {
+      // Restrict both the advertised groups and the key shares we actually
+      // send, so a caller can force a specific (e.g. post-quantum) share.
+      s.ctx->setSupportedGroups(groups);
+      s.ctx->setDefaultShares(groups);
+    }
+
+    if (verify) {
+      fizz::Error err;
+      std::unique_ptr<fizz::DefaultCertificateVerifier> v;
+      auto st = caFile.empty()
+          ? fizz::DefaultCertificateVerifier::create(
+                v, err, fizz::VerificationContext::Client, nullptr)
+          : fizz::DefaultCertificateVerifier::createFromCAFile(
+                v, err, fizz::VerificationContext::Client, caFile);
+      if (st != fizz::Status::Success || !v) {
+        throw std::runtime_error("failed to build certificate verifier");
+      }
+      std::shared_ptr<const fizz::CertificateVerifier> chain = std::move(v);
+      s.verifier = std::make_shared<HostnameVerifier>(chain, sni);
+    } else {
+      s.verifier = std::make_shared<fizz::InsecureAcceptAnyCertificate>();
+    }
+
+    if (!exts.empty()) {
+      std::vector<fizz::Extension> fexts;
+      fexts.reserve(exts.size());
+      for (const auto& [type, data] : exts) {
+        fizz::Extension ext;
+        ext.extension_type = static_cast<fizz::ExtensionType>(type);
+        ext.extension_data = folly::IOBuf::copyBuffer(data);
+        fexts.push_back(std::move(ext));
+      }
+      s.clientExts = std::make_shared<PyClientExtensions>(std::move(fexts));
+    }
+    return s;
   }
 
   // Coalesce all buffered chunks into one bytes result and resolve.
@@ -592,6 +720,19 @@ PYBIND11_MODULE(_core, m) {
           &TlsConnection::connect,
           py::arg("host"),
           py::arg("port"),
+          py::arg("sni"),
+          py::arg("alpns"),
+          py::arg("groups"),
+          py::arg("verify"),
+          py::arg("ca_file"),
+          py::arg("timeout_ms"),
+          py::arg("extensions"),
+          py::arg("resolve"),
+          py::arg("reject"))
+      .def(
+          "wrap_fd",
+          &TlsConnection::wrapFd,
+          py::arg("fd"),
           py::arg("sni"),
           py::arg("alpns"),
           py::arg("groups"),

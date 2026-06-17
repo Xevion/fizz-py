@@ -279,24 +279,43 @@ def ca_server(tmp_path):
     """
     started = []
     ca_crt, ca_key = str(tmp_path / "ca.crt"), str(tmp_path / "ca.key")
+    ca_csr = str(tmp_path / "ca.csr")
+    ca_ext = tmp_path / "ca.ext"
+    # Self-sign the CA via `x509 -req -extfile` rather than `req -x509 -addext`.
+    # On OpenSSL 1.1 (the manylinux build env) `req -x509` already injects the
+    # config's default v3_ca extensions, so -addext *duplicates* basicConstraints
+    # — a malformed cert that 1.1 then rejects as an issuer. `x509 -req` adds only
+    # the extfile's extensions, so the chain is valid on both 1.1 and 3.0.
+    ca_ext.write_text(
+        "basicConstraints=critical,CA:TRUE\n"
+        "keyUsage=critical,keyCertSign,cRLSign\n"
+        "subjectKeyIdentifier=hash\n"
+    )
     _openssl(
         "req",
-        "-x509",
         "-newkey",
         "rsa:2048",
         "-keyout",
         ca_key,
         "-out",
-        ca_crt,
-        "-days",
-        "1",
+        ca_csr,
         "-nodes",
         "-subj",
         "/CN=fizzpy Test CA",
-        "-addext",
-        "basicConstraints=critical,CA:TRUE",
-        "-addext",
-        "keyUsage=critical,keyCertSign,cRLSign",
+    )
+    _openssl(
+        "x509",
+        "-req",
+        "-in",
+        ca_csr,
+        "-signkey",
+        ca_key,
+        "-days",
+        "1",
+        "-extfile",
+        str(ca_ext),
+        "-out",
+        ca_crt,
     )
 
     def start(san: str):
@@ -304,6 +323,11 @@ def ca_server(tmp_path):
         csr = str(tmp_path / f"{tag}.csr")
         crt = str(tmp_path / f"{tag}.crt")
         key = str(tmp_path / f"{tag}.key")
+        ext = tmp_path / f"{tag}.ext"
+        # Supply the SAN to the signing step via -extfile rather than copying it
+        # from the CSR with `-copy_extensions copyall` (an OpenSSL 3.0-only flag;
+        # the manylinux build env ships OpenSSL 1.1). -extfile works on both.
+        ext.write_text(f"basicConstraints=CA:FALSE\nsubjectAltName=DNS:{san}\n")
         _openssl(
             "req",
             "-newkey",
@@ -315,8 +339,6 @@ def ca_server(tmp_path):
             "-nodes",
             "-subj",
             f"/CN={san}",
-            "-addext",
-            f"subjectAltName=DNS:{san}",
         )
         _openssl(
             "x509",
@@ -332,8 +354,8 @@ def ca_server(tmp_path):
             crt,
             "-days",
             "1",
-            "-copy_extensions",
-            "copyall",
+            "-extfile",
+            str(ext),
         )
         httpd, thread, port = _serve_tls(crt, key)
         started.append((httpd, thread))

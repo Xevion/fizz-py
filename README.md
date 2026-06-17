@@ -1,15 +1,36 @@
 # fizzpy
 
-A small TLS 1.3 HTTP client for Python, built on Facebook's
+Post-quantum TLS 1.3 for Python — plug it under the HTTP client you already use,
+or use the small built-in client. Built on Facebook's
 [Fizz](https://github.com/facebookincubator/fizz) (C++) via pybind11.
 
-By default it offers a **post-quantum key exchange** — the standardized hybrid
-`X25519MLKEM768` group (codepoint 4588). An ordinary `GET` negotiates a hybrid
-ML-KEM handshake against servers that support it (Cloudflare, Google) and falls
-back to classical X25519 against those that don't.
+By default fizzpy offers a **post-quantum key exchange**: the standardized hybrid
+`X25519MLKEM768` group (codepoint 4588). A request negotiates a hybrid ML-KEM
+handshake against servers that support it (Cloudflare, Google) and falls back to
+classical X25519 against those that don't.
 
-> TLS 1.3 only, HTTP/1.1 only. This is a focused toolkit / learning project,
-> not a drop-in `requests` replacement. See [Status](#status).
+The idea: **keep your HTTP client — swap only the TLS.** Mount fizzpy on a
+`requests.Session` and requests keeps doing everything it does well (cookies,
+redirects, retries, multipart, connection pooling); fizzpy just performs the
+handshake underneath, post-quantum by default.
+
+```python
+import requests
+from fizzpy.contrib.requests import FizzAdapter
+
+session = requests.Session()
+session.mount("https://", FizzAdapter())
+
+r = session.get("https://www.cloudflare.com")
+print(r.status_code)                          # 200
+
+# Peek at the negotiated handshake (stream=True keeps the connection attached):
+with session.get("https://www.cloudflare.com", stream=True) as r:
+    print(r.raw.connection.sock.tls["group"])  # X25519MLKEM768
+```
+
+> TLS 1.3 only, HTTP/1.1 only — a Fizz constraint, not a temporary gap. fizzpy
+> cannot talk to TLS 1.2-only servers. See [Status](#status).
 
 ![A fizzpy ClientHello in Wireshark](https://raw.githubusercontent.com/Xevion/fizz-py/master/docs/pq-handshake.png)
 
@@ -33,9 +54,94 @@ Wheels are produced by CI (`manylinux_2_28`, x86_64, CPython 3.10–3.14); if on
 isn't available for your platform yet, build from source — see
 [BUILDING.md](BUILDING.md).
 
-## Usage
+## Using fizzpy as your TLS layer
 
-Synchronous:
+This is the point of the project: your existing HTTP stack, with a post-quantum
+Fizz handshake underneath.
+
+### requests / urllib3
+
+`FizzAdapter` is a standard `requests` transport adapter (install the extra:
+`pip install fizzpy[requests]`). Mount it and every HTTPS request the session
+makes handshakes through Fizz — everything above TLS (cookies, redirects,
+retries, pooling, proxies) is still plain requests.
+
+```python
+import requests
+from fizzpy.contrib.requests import FizzAdapter
+
+session = requests.Session()
+session.mount("https://", FizzAdapter())
+
+r = session.get("https://www.cloudflare.com")
+print(r.status_code)   # 200
+
+# stream=True keeps urllib3's connection attached so the TlsSocket is reachable:
+with session.get("https://www.cloudflare.com", stream=True) as r:
+    print(r.raw.connection.sock.tls["group_code"])  # 4588
+```
+
+Shape the handshake with a [`TlsConfig`](#tlsconfig); the usual `HTTPAdapter`
+keyword arguments (`max_retries`, `pool_connections`, …) still work:
+
+```python
+from fizzpy import TlsConfig, NamedGroup
+from fizzpy.contrib.requests import FizzAdapter
+
+pq_only = TlsConfig(groups=[NamedGroup.x25519_mlkem768])
+session.mount("https://", FizzAdapter(pq_only, max_retries=3))
+```
+
+Verification follows requests' own `verify=` argument: `verify="/path/ca.pem"`
+trusts a specific CA, `verify=False` disables it. Hostname checking happens
+inside the Fizz handshake.
+
+### Any socket: `wrap_socket`
+
+The adapter is built on a single primitive — hand fizzpy an already-connected
+socket and get back a blocking, `ssl.SSLSocket`-shaped object. This is how you
+plug Fizz under anything that lets you supply your own TLS:
+
+```python
+import socket, fizzpy
+
+tcp = socket.create_connection(("www.cloudflare.com", 443))
+tls = fizzpy.wrap_socket(tcp, "www.cloudflare.com")
+
+tls.sendall(b"GET / HTTP/1.1\r\nHost: www.cloudflare.com\r\n"
+            b"Connection: close\r\n\r\n")
+print(tls.tls["group"])   # X25519MLKEM768
+print(tls.recv(64))
+```
+
+The socket's file descriptor is duplicated and handed to Fizz's event loop, so
+the caller keeps full control of the original `tcp` socket (close it whenever;
+the TLS connection lives on through the dup). The returned `TlsSocket` supports
+`recv`/`recv_into`, `send`/`sendall`, `makefile`, `settimeout`, `fileno`, and
+`close` — the slice of the socket API `http.client`/urllib3 drive.
+
+### TlsConfig
+
+`TlsConfig` is the frozen set of handshake knobs shared by `wrap_socket` and the
+contrib adapters:
+
+```python
+from fizzpy import TlsConfig, NamedGroup, Extension
+
+config = TlsConfig(
+    verify=True,                              # chain + hostname verification
+    cafile="/path/to/ca.pem",                 # default: certifi bundle
+    alpn=["http/1.1"],
+    groups=[NamedGroup.x25519_mlkem768, NamedGroup.x25519],
+    extensions=[Extension(0xFE5A, b"hi")],    # custom ClientHello extensions
+    timeout=30.0,
+)
+```
+
+## The built-in client
+
+fizzpy also ships a small standalone client, handy for scripts and for seeing
+the negotiated parameters directly. It drives the same C++ core.
 
 ```python
 import fizzpy
@@ -52,7 +158,7 @@ print(r.tls)
 #  'alpn': 'http/1.1', 'sni': 'www.cloudflare.com', 'peer_cert': '...'}
 ```
 
-Asynchronous (the same C++ core, resolved on the running event loop):
+Asynchronous (the same core, resolved on the running event loop):
 
 ```python
 import asyncio
@@ -117,16 +223,24 @@ fizzpy.Client(verify=False)               # accept any certificate (insecure)
 
 What works today:
 
+- **Pluggable TLS** under `requests`/urllib3 via `FizzAdapter`, and under any
+  client that accepts a socket via `wrap_socket`
 - TLS 1.3 handshake with classical or post-quantum (ML-KEM) key exchange
-- `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
+- Built-in client: `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
 - HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
 - Connection keep-alive with a per-host pool; automatic redirect following
 - Chain + hostname certificate verification, certifi default + custom CA trust
 
 Current limitations:
 
-- **TLS 1.3 only** (a Fizz constraint) — it cannot talk to TLS 1.2-only servers
+- **TLS 1.3 only** (a Fizz constraint) — it cannot talk to TLS 1.2-only servers.
+  If you need to reach TLS 1.2 endpoints, keep your client's default `ssl` path
+  for those hosts and mount `FizzAdapter` only where TLS 1.3 is guaranteed.
 - HTTP/1.1 only (no HTTP/2)
+- requests/urllib3 is the only packaged adapter so far; httpx and aiohttp can be
+  built on the same `wrap_socket` primitive
+- No client certificates (mutual TLS) yet; CA trust is a single bundle file
+  (no `capath`/`cadata`)
 
 ## Building
 

@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "fizzpy"
 version = "0.4.0"
-description = "A low-level TLS 1.3 client toolkit for Python, built on Facebook's Fizz"
+description = "Post-quantum TLS 1.3 for Python — plug it under requests/urllib3 or use the built-in client. Built on Facebook's Fizz."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -39,6 +39,9 @@ build = ["scikit-build-core", "pybind11>=2.13", "pybind11-stubgen"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+# The requests/urllib3 adapter (fizzpy.contrib.requests). Core fizzpy never
+# imports requests; the adapter pulls it in only when you opt into this extra.
+requests = ["requests"]
 
 [tool.ruff]
 target-version = "py310"
@@ -78,8 +81,9 @@ ignore = ["N818"]
 # Tests use stdlib handler overrides (do_GET), broad raises, and fixture
 # patterns the strict library rules would otherwise flag.
 "tests/**" = ["FBT", "PT011", "B017", "N802", "N815"]
-# Dev scripts dispatch CLI flags as positional bools.
-"scripts/**" = ["FBT"]
+# Dev scripts dispatch CLI flags as positional bools, and embed shell one-liners
+# (globs, export lines) that don't wrap under the line limit.
+"scripts/**" = ["FBT", "E501"]
 
 [tool.basedpyright]
 # Strict correctness checking, minus the Any-purity rules: the native _core
