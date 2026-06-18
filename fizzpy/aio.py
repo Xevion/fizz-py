@@ -34,6 +34,7 @@ from ._common import (
     normalize_extensions,
     parse_url,
     strip_body_headers,
+    timeout_to_ms,
 )
 from ._http import Response, ResponseParser, build_request
 from ._transport import run_async
@@ -68,7 +69,7 @@ class AsyncClient:
     ) -> None:
         self._verify = verify
         self._cafile = cafile or default_ca_file()
-        self._timeout_ms = int(timeout * 1000)
+        self._timeout_ms = timeout_to_ms(timeout)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
         self._extensions = normalize_extensions(extensions)
@@ -158,7 +159,11 @@ class AsyncClient:
         reused: bool,
     ) -> Response:
         try:
-            await run_async(lambda resolve, reject: conn.write(raw, resolve, reject))
+            await run_async(
+                lambda resolve, reject: conn.write(
+                    self._timeout_ms, raw, resolve, reject
+                )
+            )
         except Exception as exc:
             if reused:
                 raise _Stale from exc
@@ -169,7 +174,7 @@ class AsyncClient:
         while not parser.is_complete():
             try:
                 chunk = await run_async(
-                    lambda resolve, reject: conn.read(resolve, reject)
+                    lambda resolve, reject: conn.read(self._timeout_ms, resolve, reject)
                 )
             except Exception as exc:
                 if reused and not received:

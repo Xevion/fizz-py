@@ -30,7 +30,8 @@ with session.get("https://www.cloudflare.com", stream=True) as r:
 ```
 
 > TLS 1.3 only, HTTP/1.1 only — a Fizz constraint, not a temporary gap. fizzpy
-> cannot talk to TLS 1.2-only servers. See [Status](#status).
+> cannot natively talk to TLS 1.2-only servers (an opt-in stdlib fallback can).
+> See [Status](#status).
 
 ![A fizzpy ClientHello in Wireshark](https://raw.githubusercontent.com/Xevion/fizz-py/master/docs/pq-handshake.png)
 
@@ -129,6 +130,24 @@ Unlike the requests adapter, TLS is configured via `TlsConfig`, **not** httpx's
 the `verify=` slot to install itself — meaning httpx's own `verify=`/`cert=`
 can't also be honored. `FizzHTTPTransport` rejects them (and `http2=True`, which
 it can't support) with a clear error rather than silently ignoring them.
+
+### Reaching TLS 1.2-only hosts
+
+Fizz speaks TLS 1.3 only, so by default a request to a TLS 1.2-only server fails
+loudly (a post-quantum handshake is the whole point — silently downgrading would
+defeat it). When you'd rather reach such hosts anyway, opt into a fallback: on a
+version-mismatch failure, fizzpy retries the connection over the standard library
+`ssl` module — a classical (non post-quantum) handshake.
+
+```python
+session.mount("https://", FizzAdapter(fallback=True))           # requests
+httpx.Client(transport=FizzHTTPTransport(fallback=True))        # httpx
+```
+
+The fallback fires **only** on a `protocol_version` alert. A certificate or
+hostname failure still raises — a bad cert is never downgraded into a successful
+classical handshake. The retry honours the same `TlsConfig` verification (CA
+bundle, `verify=False`) the Fizz handshake would have used.
 
 ### Any socket: `wrap_socket`
 
@@ -265,18 +284,34 @@ What works today:
 - HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
 - Connection keep-alive with a per-host pool; automatic redirect following
 - Chain + hostname certificate verification, certifi default + custom CA trust
+- TLS failures raise the client's native SSL error type — `requests.exceptions.SSLError`,
+  `httpx.ConnectError`, or `ssl.SSLCertVerificationError` from `wrap_socket` — with
+  messages free of C++ internals, so existing `except` blocks work unchanged
+- Read/write deadlines: `settimeout` (and the `timeout=` of requests/httpx) bound
+  each operation, so a stalled peer raises `socket.timeout` (→ `ReadTimeout`)
+  instead of hanging
+- Thread-safe under pooling: every connection is driven on one shared event loop,
+  so a mounted `FizzAdapter` can be used from many threads concurrently
+- Plain `CONNECT` proxies work transparently — the HTTP client performs the
+  `CONNECT` and fizzpy does the TLS handshake over the tunnel, so
+  HTTPS-through-proxy needs nothing extra (an HTTPS proxy itself is unsupported,
+  see below)
 
 Current limitations:
 
 - **TLS 1.3 only** (a Fizz constraint) — it cannot talk to TLS 1.2-only servers.
-  If you need to reach TLS 1.2 endpoints, keep your client's default `ssl` path
-  for those hosts and mount `FizzAdapter` only where TLS 1.3 is guaranteed.
+  By default such a request fails loudly; opt into a stdlib `ssl` fallback with
+  `fallback=True` to reach those hosts over a classical handshake instead (see
+  [Reaching TLS 1.2-only hosts](#reaching-tls-12-only-hosts)).
 - HTTP/1.1 only (no HTTP/2)
 - Packaged adapters: requests/urllib3 and httpx (sync). An async httpx transport
   and an aiohttp connector can be built on the same `wrap_socket` primitive but
   aren't shipped yet
 - No client certificates (mutual TLS) yet; CA trust is a single bundle file
   (no `capath`/`cadata`)
+- HTTPS *proxies* (TLS to the proxy itself) aren't supported — fizzpy would try a
+  post-quantum handshake against the proxy. Plain `CONNECT` proxies tunnelling to
+  an HTTPS origin work fine
 
 ## Building
 

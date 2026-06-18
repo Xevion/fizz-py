@@ -7,10 +7,13 @@
 #include <fizz/client/FizzClientContext.h>
 #include <fizz/protocol/DefaultCertificateVerifier.h>
 #include <fizz/tool/CertificateVerifiers.h>
+#include <fizz/record/Types.h>
+#include <fizz/util/Exceptions.h>
 
 #include <folly/SocketAddress.h>
 #include <folly/io/IOBuf.h>
 #include <folly/io/async/AsyncSocket.h>
+#include <folly/io/async/AsyncTimeout.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/net/NetOps.h>
@@ -20,6 +23,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include <cassert>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -64,9 +68,75 @@ struct Promise {
   }
 };
 
-// Build a Python exception object carrying `msg` (GIL must be held).
+// Build a Python exception object carrying `msg` (GIL must be held). Used for
+// transport-level failures (connect/read/write) — a ConnectionError, an OSError
+// subclass, matching what a plain socket raises.
 py::object makeError(const std::string& msg) {
   return py::module_::import("builtins").attr("ConnectionError")(msg);
+}
+
+// Build the Python exception for a read/write that exceeds its deadline (GIL
+// must be held). socket.timeout — an OSError subclass, and == TimeoutError on
+// 3.10+ — is exactly what a blocking ssl.SSLSocket raises on timeout, so
+// urllib3 maps it to a ReadTimeout and httpcore to httpx.ReadTimeout: the
+// failure stays idiomatic for clients layered on top.
+py::object makeTimeoutError(const std::string& msg) {
+  return py::module_::import("socket").attr("timeout")(msg);
+}
+
+// Build the Python exception for a TLS *handshake* failure (GIL must be held).
+// Mapping to ssl's own exception types — rather than a generic ConnectionError —
+// is what lets clients layered on top classify the failure the way they do for
+// an OpenSSL handshake: urllib3 promotes ssl.SSLError to requests' SSLError, and
+// httpcore folds it into httpx.ConnectError. A certificate or hostname
+// verification failure becomes ssl.SSLCertVerificationError; every other
+// handshake failure becomes ssl.SSLError. `msg` must already be the clean fizz
+// message, with no folly/C++ type prefix. When the underlying Fizz alert is
+// known, `alertName` (e.g. "protocol_version") is attached as a `fizz_alert`
+// attribute so Python can classify the failure on a typed signal instead of
+// scraping the message text — the stdlib fallback keys its downgrade decision
+// on exactly this.
+py::object makeTlsError(
+    const std::string& msg,
+    bool certError,
+    const std::string& alertName = "") {
+  auto ssl = py::module_::import("ssl");
+  py::object err = certError
+      ? ssl.attr("SSLCertVerificationError")(msg)
+      : ssl.attr("SSLError")(std::string("handshake failed: ") + msg);
+  if (!alertName.empty()) {
+    err.attr("fizz_alert") = py::str(alertName);
+  }
+  return err;
+}
+
+// Map an AsyncSocketException from the TCP-connecting path to a Python exception.
+// Only a TLS-layer failure (SSL_ERROR) becomes an ssl error; TCP/DNS/timeout
+// failures stay a ConnectionError, since they are not TLS problems. folly's
+// AsyncFizzClient collapses the handshake error into this flattened string and
+// drops the typed fizz exception, so unlike the wrapFd path (which classifies on
+// the exception type and carries the alert) this path can only best-effort: strip
+// folly's "AsyncSocketException: <msg>, type = ..." wrapper back to <msg>, and
+// classify cert failures by the specific phrases fizz emits — a chain failure
+// ("...certificate...") or this module's own hostname check (HostnameVerifier:
+// "certificate does not match hostname '...'"). Bare "verification"/"hostname"
+// are deliberately avoided as too collision-prone.
+py::object tlsErrorFromAsyncSocket(const folly::AsyncSocketException& ex) {
+  std::string msg = ex.what();
+  const std::string prefix = "AsyncSocketException: ";
+  if (msg.rfind(prefix, 0) == 0) {
+    msg.erase(0, prefix.size());
+  }
+  auto typePos = msg.rfind(", type = ");
+  if (typePos != std::string::npos) {
+    msg.erase(typePos);
+  }
+  if (ex.getType() != folly::AsyncSocketException::SSL_ERROR) {
+    return makeError(std::string("connect failed: ") + msg);
+  }
+  bool certError = msg.find("certificate") != std::string::npos ||
+      msg.find("does not match hostname") != std::string::npos;
+  return makeTlsError(msg, certError);
 }
 
 // Wraps a chain verifier (e.g. DefaultCertificateVerifier) and adds the
@@ -184,6 +254,9 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     // the loop thread can run.
     py::gil_scoped_release release;
     evb_->runInEventBaseThreadAndWait([this] {
+      // AsyncTimeout is bound to the EventBase and must be destroyed on its
+      // thread; reset it here (also cancels any armed read deadline).
+      readTimeout_.reset();
       if (client_) {
         client_->setReadCB(nullptr);
         client_->closeNow();
@@ -197,8 +270,8 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     }
   }
 
-  // Establish TCP + TLS to host:port. Resolves with None on handshake success,
-  // rejects with ConnectionError otherwise.
+  // Establish TCP + TLS to host:port. Resolves with None on handshake success;
+  // rejects with an ssl error on a TLS failure, a ConnectionError otherwise.
   void connect(
       const std::string& host,
       uint16_t port,
@@ -260,7 +333,8 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
   // This is the seam that lets fizzpy slot under requests/httpx/aiohttp: they
   // own connection management; we own only the TLS layer. Takes ownership of the
   // fd (the adopted AsyncSocket closes it on teardown), so callers pass a dup.
-  // Resolves with None on handshake success, rejects with ConnectionError.
+  // Resolves with None on handshake success; rejects with ssl.SSLError
+  // (ssl.SSLCertVerificationError for a verification failure) on a TLS failure.
   void wrapFd(
       int fd,
       const std::string& sni,
@@ -326,16 +400,25 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
   }
 
   // Send application bytes. Resolves with None on flush, rejects on error.
-  void write(py::bytes data, py::function resolve, py::function reject) {
+  // `timeoutMs` bounds how long the write may take before failing with a
+  // socket.timeout (0 = no deadline); it maps to the transport's send timeout.
+  void write(
+      uint32_t timeoutMs,
+      py::bytes data,
+      py::function resolve,
+      py::function reject) {
     std::string bytes = data; // copy out under GIL
     auto promise = std::make_shared<Promise>(
         Promise{std::move(resolve), std::move(reject)});
     evb_->runInEventBaseThread(
-        [this, bytes = std::move(bytes), promise]() mutable {
+        [this, timeoutMs, bytes = std::move(bytes), promise]() mutable {
           if (!client_ || !client_->good()) {
             rejectOnLoop(promise, "connection not open");
             return;
           }
+          // Re-applied on every write so a prior write's deadline can't leak
+          // into this one; setSendTimeout(0) disables the deadline.
+          client_->setSendTimeout(timeoutMs);
           auto* cb = new WriteCb(promise);
           client_->writeChain(cb, folly::IOBuf::copyBuffer(bytes));
         });
@@ -343,11 +426,12 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
 
   // Read the next chunk of decrypted application bytes. Resolves with bytes
   // (empty bytes == EOF), rejects on transport error. At most one read may be
-  // outstanding at a time.
-  void read(py::function resolve, py::function reject) {
+  // outstanding at a time. `timeoutMs` bounds how long a parked read waits for
+  // data before failing with a socket.timeout (0 = block indefinitely).
+  void read(uint32_t timeoutMs, py::function resolve, py::function reject) {
     auto promise = std::make_shared<Promise>(
         Promise{std::move(resolve), std::move(reject)});
-    evb_->runInEventBaseThread([this, promise]() mutable {
+    evb_->runInEventBaseThread([this, timeoutMs, promise]() mutable {
       if (!buffer_.empty()) {
         fulfillRead(promise);
         return;
@@ -361,6 +445,9 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
         return;
       }
       pendingRead_ = std::move(*promise);
+      if (timeoutMs > 0) {
+        armReadTimeout(timeoutMs);
+      }
     });
   }
 
@@ -406,27 +493,21 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
       buffer_.push_back(std::move(buf));
     }
     if (pendingRead_) {
-      auto p = std::make_shared<Promise>(std::move(*pendingRead_));
-      pendingRead_.reset();
-      fulfillRead(p);
+      fulfillRead(takePendingRead());
     }
   }
 
   void readEOF() noexcept override {
     eof_ = true;
     if (pendingRead_) {
-      auto p = std::make_shared<Promise>(std::move(*pendingRead_));
-      pendingRead_.reset();
-      resolveBytes(p, std::string());
+      resolveBytes(takePendingRead(), std::string());
     }
   }
 
   void readErr(const folly::AsyncSocketException& ex) noexcept override {
     readErr_ = std::string("read error: ") + ex.what();
     if (pendingRead_) {
-      auto p = std::make_shared<Promise>(std::move(*pendingRead_));
-      pendingRead_.reset();
-      rejectOnLoop(p, *readErr_);
+      rejectOnLoop(takePendingRead(), *readErr_);
     }
   }
 
@@ -451,9 +532,15 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
 
     void connectErr(const folly::AsyncSocketException& ex) noexcept override {
       py::gil_scoped_acquire gil;
-      auto reject = std::move(promise->reject);
-      promise.reset();
-      reject(makeError(std::string("handshake failed: ") + ex.what()));
+      // noexcept: contain any Python exception from building/raising the error.
+      try {
+        auto reject = std::move(promise->reject);
+        promise.reset();
+        reject(tlsErrorFromAsyncSocket(ex));
+      } catch (py::error_already_set& e) {
+        e.discard_as_unraisable("fizzpy connect-error callback");
+      } catch (...) {
+      }
       delete this;
     }
   };
@@ -482,10 +569,33 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
         fizz::client::AsyncFizzClient* /*client*/,
         folly::exception_wrapper ex) noexcept override {
       py::gil_scoped_acquire gil;
-      auto reject = std::move(promise->reject);
-      promise.reset();
-      reject(makeError(
-          std::string("handshake failed: ") + ex.what().toStdString()));
+      // Building/raising the Python exception can throw (py::error_already_set);
+      // this callback is noexcept, so a leaked C++ exception would terminate the
+      // interpreter. Contain it and report as unraisable instead.
+      try {
+        auto reject = std::move(promise->reject);
+        promise.reset();
+        // The adopted-fd path keeps the original exception, so classify by type
+        // and read the underlying message (std::exception::what() omits folly's
+        // "fizz::...Exception:" prefix that exception_wrapper::what() prepends).
+        bool certError =
+            ex.get_exception<fizz::FizzVerificationException>() != nullptr;
+        // Carry the typed alert (e.g. protocol_version) when fizz set one, so
+        // the Python fallback keys on it rather than the message text.
+        std::string alertName;
+        if (const auto* fe = ex.get_exception<fizz::FizzException>()) {
+          if (auto alert = fe->getAlert()) {
+            alertName = fizz::toString(*alert);
+          }
+        }
+        const auto* base = ex.get_exception<std::exception>();
+        std::string msg =
+            base ? std::string(base->what()) : ex.what().toStdString();
+        reject(makeTlsError(msg, certError, alertName));
+      } catch (py::error_already_set& e) {
+        e.discard_as_unraisable("fizzpy handshake-error callback");
+      } catch (...) {
+      }
       delete this;
     }
   };
@@ -505,9 +615,19 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     void writeErr(size_t, const folly::AsyncSocketException& ex) noexcept
         override {
       py::gil_scoped_acquire gil;
-      auto reject = std::move(promise->reject);
-      promise.reset();
-      reject(makeError(std::string("write failed: ") + ex.what()));
+      // noexcept: contain any Python exception from building/raising the error.
+      try {
+        auto reject = std::move(promise->reject);
+        promise.reset();
+        if (ex.getType() == folly::AsyncSocketException::TIMED_OUT) {
+          reject(makeTimeoutError("write timed out"));
+        } else {
+          reject(makeError(std::string("write failed: ") + ex.what()));
+        }
+      } catch (py::error_already_set& e) {
+        e.discard_as_unraisable("fizzpy write-error callback");
+      } catch (...) {
+      }
       delete this;
     }
   };
@@ -596,6 +716,50 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
     return s;
   }
 
+  // Move the parked read promise out, cancelling its deadline first. Every path
+  // that fulfils a pending read (data, EOF, transport error) goes through here,
+  // so the timeout never fires after the read has already been answered.
+  std::shared_ptr<Promise> takePendingRead() {
+    assert(pendingRead_ && "takePendingRead requires a parked read");
+    if (readTimeout_) {
+      readTimeout_->cancelTimeout();
+    }
+    auto p = std::make_shared<Promise>(std::move(*pendingRead_));
+    pendingRead_.reset();
+    return p;
+  }
+
+  // Schedule the read deadline, creating the AsyncTimeout lazily. Runs on the
+  // loop thread (from read()); the timeout fires there too, so pendingRead_ is
+  // only ever touched by one thread.
+  void armReadTimeout(uint32_t timeoutMs) {
+    if (!readTimeout_) {
+      readTimeout_ = folly::AsyncTimeout::make(
+          *evb_, [this]() noexcept { onReadTimeout(); });
+    }
+    readTimeout_->scheduleTimeout(std::chrono::milliseconds(timeoutMs));
+  }
+
+  // The parked read outlived its deadline: reject it with socket.timeout. A
+  // null pendingRead_ means data/EOF/error already answered and cancelled us.
+  void onReadTimeout() noexcept {
+    if (!pendingRead_) {
+      return;
+    }
+    auto p = std::make_shared<Promise>(std::move(*pendingRead_));
+    pendingRead_.reset();
+    py::gil_scoped_acquire gil;
+    // noexcept: contain any Python exception from building/raising the timeout.
+    try {
+      auto reject = std::move(p->reject);
+      p->resolve = py::function();
+      reject(makeTimeoutError("read timed out"));
+    } catch (py::error_already_set& e) {
+      e.discard_as_unraisable("fizzpy read-timeout callback");
+    } catch (...) {
+    }
+  }
+
   // Coalesce all buffered chunks into one bytes result and resolve.
   void fulfillRead(std::shared_ptr<Promise> promise) {
     std::string out;
@@ -625,6 +789,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
 
   std::deque<std::unique_ptr<folly::IOBuf>> buffer_;
   std::optional<Promise> pendingRead_;
+  std::unique_ptr<folly::AsyncTimeout> readTimeout_;
   bool eof_{false};
   std::optional<std::string> readErr_;
 
@@ -742,8 +907,8 @@ PYBIND11_MODULE(_core, m) {
           py::arg("extensions"),
           py::arg("resolve"),
           py::arg("reject"))
-      .def("write", &TlsConnection::write, py::arg("data"), py::arg("resolve"), py::arg("reject"))
-      .def("read", &TlsConnection::read, py::arg("resolve"), py::arg("reject"))
+      .def("write", &TlsConnection::write, py::arg("timeout_ms"), py::arg("data"), py::arg("resolve"), py::arg("reject"))
+      .def("read", &TlsConnection::read, py::arg("timeout_ms"), py::arg("resolve"), py::arg("reject"))
       .def("negotiated", &TlsConnection::negotiated)
       .def("close", &TlsConnection::close);
 }

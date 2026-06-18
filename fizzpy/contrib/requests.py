@@ -53,18 +53,33 @@ class FizzAdapter(HTTPAdapter):
     Mount it for ``https://`` (and it composes with every other requests
     feature). Optionally pass a :class:`fizzpy.TlsConfig` to shape the handshake;
     all the usual ``HTTPAdapter`` keyword arguments (``max_retries``,
-    ``pool_connections``, ...) are still accepted.
+    ``pool_connections``, ...) are still accepted. ``fallback=True`` reaches
+    TLS-1.2-only hosts over the stdlib ``ssl`` module (a classical, non
+    post-quantum handshake) instead of failing on them.
     """
 
-    def __init__(self, config: TlsConfig | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        config: TlsConfig | None = None,
+        *,
+        fallback: bool = False,
+        **kwargs: Any,
+    ) -> None:
         # Set before super().__init__, which calls init_poolmanager during build.
         self._fizz_config = config
+        # Opt-in: reach TLS-1.2-only hosts (which Fizz can't handshake) over the
+        # stdlib ssl module — classical, non post-quantum. See FizzSSLContext.
+        self._fallback = fallback
         super().__init__(**kwargs)
 
     def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
-        kwargs["ssl_context"] = FizzSSLContext(self._fizz_config)
+        kwargs["ssl_context"] = FizzSSLContext(
+            self._fizz_config, fallback=self._fallback
+        )
         super().init_poolmanager(*args, **kwargs)
 
     def proxy_manager_for(self, *args: Any, **kwargs: Any) -> Any:
-        kwargs["ssl_context"] = FizzSSLContext(self._fizz_config)
+        kwargs["ssl_context"] = FizzSSLContext(
+            self._fizz_config, fallback=self._fallback
+        )
         return super().proxy_manager_for(*args, **kwargs)

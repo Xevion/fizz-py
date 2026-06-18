@@ -1,6 +1,7 @@
 """The wrap_socket primitive: a Fizz TLS handshake over a caller-owned socket."""
 
 import socket
+import ssl
 from urllib.parse import urlsplit
 
 import pytest
@@ -69,9 +70,14 @@ def test_wrap_socket_rejects_wrong_hostname(ca_server):
     url, cafile, _ = ca_server("wrong.example")
     tcp = _connect(url)
     try:
-        with pytest.raises(ConnectionError) as excinfo:
+        # A verification failure surfaces as ssl.SSLCertVerificationError — the
+        # same type OpenSSL raises — so clients layered on top classify it as a
+        # TLS error, not a generic connection drop. The message is clean (no
+        # leaked "fizz::...Exception:" C++ type prefix).
+        with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
             fizzpy.wrap_socket(tcp, "localhost", TlsConfig(cafile=cafile))
         assert "hostname" in str(excinfo.value).lower()
+        assert "fizz::" not in str(excinfo.value)
     finally:
         tcp.close()
 
@@ -81,7 +87,7 @@ def test_wrap_socket_rejects_untrusted_chain(local_server):
     # server's self-signed cert.
     tcp = _connect(local_server.url)
     try:
-        with pytest.raises(ConnectionError):
+        with pytest.raises(ssl.SSLCertVerificationError):
             fizzpy.wrap_socket(tcp, "localhost")
     finally:
         tcp.close()

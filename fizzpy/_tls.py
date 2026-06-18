@@ -37,6 +37,7 @@ from ._common import (
     READ_DONE,
     default_ca_file,
     normalize_extensions,
+    timeout_to_ms,
 )
 from ._transport import run_sync
 
@@ -69,7 +70,7 @@ class TlsConfig:
 
     @property
     def timeout_ms(self) -> int:
-        return int(self.timeout * 1000)
+        return timeout_to_ms(self.timeout)
 
     def normalized_extensions(self) -> list[tuple[int, bytes]]:
         return normalize_extensions(self.extensions)
@@ -154,7 +155,9 @@ class TlsSocket:
             return out
         if self._eof:
             return b""
-        chunk = run_sync(lambda resolve, reject: self._conn.read(resolve, reject))
+        chunk = run_sync(
+            lambda resolve, reject: self._conn.read(self._timeout_ms(), resolve, reject)
+        )
         if chunk == READ_DONE:
             self._eof = True
             return b""
@@ -169,7 +172,11 @@ class TlsSocket:
         return n
 
     def sendall(self, data: Any, flags: int = 0) -> None:
-        run_sync(lambda resolve, reject: self._conn.write(bytes(data), resolve, reject))
+        run_sync(
+            lambda resolve, reject: self._conn.write(
+                self._timeout_ms(), bytes(data), resolve, reject
+            )
+        )
 
     def send(self, data: Any, flags: int = 0) -> int:
         payload = bytes(data)
@@ -214,12 +221,18 @@ class TlsSocket:
         return io.TextIOWrapper(buffer, encoding, errors, newline)  # pyright: ignore[reportArgumentType]
 
     def settimeout(self, timeout: float | None) -> None:
-        # Stored for API compatibility; the handshake already honours the
-        # configured timeout. Per-read deadlines are not yet enforced.
+        # Becomes the per-operation deadline: a recv/sendall that blocks longer
+        # than this raises socket.timeout (None = block indefinitely). urllib3
+        # and httpcore call this before reading, so their read timeouts now
+        # propagate into the Fizz read/write.
         self._timeout = timeout
 
     def gettimeout(self) -> float | None:
         return self._timeout
+
+    def _timeout_ms(self) -> int:
+        """Current deadline in whole milliseconds; 0 means block indefinitely."""
+        return timeout_to_ms(self._timeout)
 
     def setsockopt(self, *args: object) -> None:
         # Socket options belong on the raw TCP socket (set before the handshake);

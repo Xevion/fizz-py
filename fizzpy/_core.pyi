@@ -116,12 +116,14 @@ class TlsConnection:
     ) -> None: ...
     def write(
         self,
+        timeout_ms: int,
         data: bytes,
         resolve: Callable[[None], None],
         reject: Callable[[BaseException], None],
     ) -> None: ...
     def read(
         self,
+        timeout_ms: int,
         resolve: Callable[[bytes], None],
         reject: Callable[[BaseException], None],
     ) -> None: ...

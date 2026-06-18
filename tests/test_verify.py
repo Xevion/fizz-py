@@ -1,5 +1,7 @@
 """Certificate + hostname verification against hermetic local TLS servers."""
 
+import ssl
+
 import pytest
 
 import fizzpy
@@ -8,9 +10,11 @@ import fizzpy
 def test_untrusted_cert_is_rejected_by_default(self_signed_server):
     url, _ = self_signed_server
     # Default verify=True validates the chain against the system trust store,
-    # which does not contain our freshly minted self-signed cert.
-    with pytest.raises(ConnectionError):
+    # which does not contain our freshly minted self-signed cert. A verification
+    # failure raises ssl.SSLCertVerificationError, matching OpenSSL.
+    with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
         fizzpy.get(url)
+    assert "fizz::" not in str(excinfo.value)
 
 
 def test_verify_false_accepts_untrusted_cert(self_signed_server):
@@ -34,7 +38,7 @@ def test_trusted_chain_with_wrong_hostname_is_rejected(ca_server):
     # The chain is trusted (CA in cafile), but the cert's SAN is wrong.example
     # while we connect to localhost — the hostname check must reject it.
     url, cafile, _ = ca_server("wrong.example")
-    with pytest.raises(ConnectionError) as excinfo:
+    with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
         fizzpy.get(url, cafile=cafile)
     assert "hostname" in str(excinfo.value).lower()
 

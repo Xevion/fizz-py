@@ -29,17 +29,21 @@ def test_verifies_trusted_chain(ca_server):
 
 def test_rejects_wrong_hostname(ca_server):
     url, cafile, _ = ca_server("wrong.example")
+    # httpcore folds an ssl.SSLError into httpx.ConnectError, the same type real
+    # httpx raises for a TLS failure — so the error reads as native httpx. The
+    # message is clean of leaked "fizz::...Exception:" C++ type names.
     with (
         _client(fizzpy.TlsConfig(cafile=cafile)) as client,
-        pytest.raises(httpx.HTTPError) as excinfo,
+        pytest.raises(httpx.ConnectError) as excinfo,
     ):
         client.get(url)
     assert "hostname" in str(excinfo.value).lower()
+    assert "fizz::" not in str(excinfo.value)
 
 
 def test_rejects_untrusted_chain_by_default(local_server):
     # Default config verifies against certifi, which does not trust the cert.
-    with _client() as client, pytest.raises(httpx.HTTPError):
+    with _client() as client, pytest.raises(httpx.ConnectError):
         client.get(local_server.url)
 
 
@@ -68,6 +72,14 @@ def test_rejects_unsupported_kwargs():
         FizzHTTPTransport(cert="x")
     with pytest.raises(ValueError):
         FizzHTTPTransport(http2=True)
+
+
+def test_opt_in_fallback_reaches_tls12_host(tls12_server):
+    transport = FizzHTTPTransport(fizzpy.TlsConfig(verify=False), fallback=True)
+    with httpx.Client(transport=transport) as client:
+        r = client.get(tls12_server.url)
+    assert r.status_code == 200
+    assert r.text == "hello from local tls"
 
 
 @pytest.mark.network

@@ -38,6 +38,7 @@ from ._common import (
     normalize_extensions,
     parse_url,
     strip_body_headers,
+    timeout_to_ms,
 )
 from ._core import NamedGroup
 from ._http import Headers, Response, ResponseParser, build_request
@@ -95,7 +96,7 @@ class Client:
     ) -> None:
         self._verify = verify
         self._cafile = cafile or default_ca_file()
-        self._timeout_ms = int(timeout * 1000)
+        self._timeout_ms = timeout_to_ms(timeout)
         self._alpn = list(alpn) if alpn is not None else list(DEFAULT_ALPN)
         self._groups = list(groups) if groups is not None else list(DEFAULT_GROUPS)
         self._extensions = normalize_extensions(extensions)
@@ -186,7 +187,11 @@ class Client:
         reused: bool,
     ) -> Response:
         try:
-            run_sync(lambda resolve, reject: conn.write(raw, resolve, reject))
+            run_sync(
+                lambda resolve, reject: conn.write(
+                    self._timeout_ms, raw, resolve, reject
+                )
+            )
         except Exception as exc:
             # A reused connection that fails before the request lands was closed
             # by the server while idle — safe to retry on a fresh one.
@@ -198,7 +203,9 @@ class Client:
         received = False
         while not parser.is_complete():
             try:
-                chunk = run_sync(lambda resolve, reject: conn.read(resolve, reject))
+                chunk = run_sync(
+                    lambda resolve, reject: conn.read(self._timeout_ms, resolve, reject)
+                )
             except Exception as exc:
                 if reused and not received:
                     raise _Stale from exc

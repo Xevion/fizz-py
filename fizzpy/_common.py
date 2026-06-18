@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urljoin, urlsplit
@@ -12,6 +13,25 @@ DEFAULT_ALPN = ["http/1.1"]
 DEFAULT_TIMEOUT_MS = 30_000
 DEFAULT_MAX_REDIRECTS = 10
 READ_DONE = b""
+
+# The native read/write deadline is a uint32 millisecond count where 0 means
+# "block indefinitely"; cap conversions at its max.
+_MAX_TIMEOUT_MS = 0xFFFFFFFF
+
+
+def timeout_to_ms(timeout: float | None) -> int:
+    """Convert a seconds timeout to the native uint32 millisecond deadline.
+
+    ``None`` maps to ``0`` (block indefinitely). A positive timeout is rounded
+    *up* to at least 1ms so a sub-millisecond value can't truncate to 0 and be
+    misread as "no deadline"; a non-positive value becomes 1ms ("fail fast")
+    rather than infinite. The result is clamped to the uint32 ceiling.
+    """
+    if timeout is None:
+        return 0
+    if timeout <= 0:
+        return 1
+    return min(_MAX_TIMEOUT_MS, max(1, math.ceil(timeout * 1000)))
 
 
 def default_ca_file() -> str:

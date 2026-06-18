@@ -59,10 +59,17 @@ class FizzHTTPTransport(httpx.HTTPTransport):
     :class:`fizzpy.TlsConfig` to shape the handshake; the usual ``HTTPTransport``
     keyword arguments (``limits``, ``retries``, ``proxy``, ``trust_env``, ...) are
     still accepted. ``verify``/``cert``/``http2`` are not — see the module
-    docstring for why.
+    docstring for why. ``fallback=True`` reaches TLS-1.2-only hosts over the
+    stdlib ``ssl`` module (a classical, non post-quantum handshake).
     """
 
-    def __init__(self, config: TlsConfig | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        config: TlsConfig | None = None,
+        *,
+        fallback: bool = False,
+        **kwargs: Any,
+    ) -> None:
         for unsupported in ("verify", "cert"):
             if unsupported in kwargs:
                 raise TypeError(
@@ -78,4 +85,5 @@ class FizzHTTPTransport(httpx.HTTPTransport):
         # The duck-typed context rides in via verify=; httpx's create_ssl_context
         # returns it untouched and hands it to httpcore, which drives the handshake.
         # (verify wants ssl.SSLContext|str|bool; FizzSSLContext only quacks like one.)
-        super().__init__(verify=FizzSSLContext(config), **kwargs)  # pyright: ignore[reportArgumentType]
+        # fallback=True lets TLS-1.2-only hosts be reached over stdlib ssl.
+        super().__init__(verify=FizzSSLContext(config, fallback=fallback), **kwargs)  # pyright: ignore[reportArgumentType]

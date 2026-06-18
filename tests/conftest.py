@@ -11,6 +11,7 @@ certs give deterministic, offline targets:
   passed to the client via ``cafile``), isolating the hostname check.
 """
 
+import contextlib
 import http.server
 import socket
 import ssl
@@ -22,15 +23,12 @@ import pytest
 BODY = b"hello from local tls"
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-class _DualStackServer(http.server.HTTPServer):
+class _DualStackServer(http.server.ThreadingHTTPServer):
     # "localhost" may resolve to ::1 or 127.0.0.1 depending on the resolver;
     # bind a dual-stack IPv6 socket so the client reaches us either way.
+    # Threaded so concurrent keep-alive connections are each served on their own
+    # thread — a single-threaded server would let one persistent connection
+    # starve all the others (see test_concurrency).
     address_family = socket.AF_INET6
 
     def server_bind(self):
@@ -38,8 +36,13 @@ class _DualStackServer(http.server.HTTPServer):
         super().server_bind()
 
 
-def _serve_tls(cert: str, key: str):
-    """Start a dual-stack TLS 1.3 HTTP server; return (httpd, thread, port)."""
+def _serve_tls(cert: str, key: str, *, max_version: "ssl.TLSVersion | None" = None):
+    """Start a dual-stack TLS HTTP server; return (httpd, thread, port).
+
+    Defaults to TLS 1.3 only (the version Fizz speaks). Pass ``max_version`` to
+    cap the server below 1.3 — e.g. ``ssl.TLSVersion.TLSv1_2`` for a server Fizz
+    cannot handshake, used to exercise the opt-in stdlib fallback.
+    """
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -52,10 +55,18 @@ def _serve_tls(cert: str, key: str):
         def log_message(self, *args):
             pass
 
-    port = _free_port()
-    httpd = _DualStackServer(("::", port), Handler)
+    # Bind port 0 and read back the assigned port: no close-then-rebind gap for
+    # another listener to slip into, so concurrent fixtures can't race for a port.
+    httpd = _DualStackServer(("::", 0), Handler)
+    port = httpd.server_address[1]
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    if max_version is None:
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    else:
+        # Pin both ends so the server's version envelope is deterministic and
+        # doesn't drift with the stdlib/OpenSSL default minimum.
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.maximum_version = max_version
     ctx.load_cert_chain(cert, key)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
 
@@ -88,12 +99,12 @@ def raw_clienthello_server():
     client's handshake fails. Lets a test inspect exactly what fizzpy sent
     without completing a handshake. Exposes ``.url`` and ``.clienthello``.
     """
-    port = _free_port()
     srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("::", port))
+    srv.bind(("::", 0))
     srv.listen(1)
+    port = srv.getsockname()[1]
     captured = {}
 
     def serve():
@@ -149,6 +160,174 @@ def self_signed_server(tmp_path_factory):
         yield f"https://127.0.0.1:{port}/", BODY
     finally:
         httpd.shutdown()
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def tls12_server(tmp_path):
+    """Yield a self-signed server capped at TLS 1.2, which Fizz cannot handshake.
+
+    Fizz fails against it with a ``protocol_version`` alert; the opt-in stdlib
+    fallback (``fallback=True``) completes the handshake classically instead.
+    Exposes ``.url`` (use ``verify=False`` — the cert is self-signed).
+    """
+    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
+    _openssl(
+        "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert,
+        "-days", "1", "-nodes", "-subj", "/CN=localhost",
+    )  # fmt: skip
+    httpd, thread, port = _serve_tls(cert, key, max_version=ssl.TLSVersion.TLSv1_2)
+
+    class Handle:
+        url = f"https://127.0.0.1:{port}/"
+
+    try:
+        yield Handle()
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def stalling_server(tmp_path):
+    """A TLS 1.3 server that completes the handshake then never responds.
+
+    The Fizz handshake succeeds, but the application read blocks forever — used
+    to verify read deadlines are enforced (a stalled peer must raise
+    socket.timeout, not hang the caller). Exposes ``.url`` (use ``verify=False``).
+    """
+    cert, key = str(tmp_path / "c.pem"), str(tmp_path / "k.pem")
+    _openssl(
+        "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert,
+        "-days", "1", "-nodes", "-subj", "/CN=localhost",
+    )  # fmt: skip
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    ctx.load_cert_chain(cert, key)
+
+    srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("::", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+    srv.settimeout(0.25)
+    stop = threading.Event()
+    held: list[ssl.SSLSocket] = []
+
+    def serve():
+        while not stop.is_set():
+            try:
+                raw, _ = srv.accept()
+            except OSError:
+                continue
+            try:
+                # Bound the server-side handshake so a client that gives up
+                # mid-handshake can't wedge this single serve thread. Complete
+                # the handshake, then hold the connection open without ever
+                # writing a response, so the client's read stalls.
+                raw.settimeout(5)
+                held.append(ctx.wrap_socket(raw, server_side=True))
+            except OSError:
+                raw.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+
+    class Handle:
+        url = f"https://127.0.0.1:{port}/"
+
+    try:
+        yield Handle()
+    finally:
+        stop.set()
+        srv.close()
+        thread.join(timeout=5)
+        for conn in held:
+            conn.close()
+
+
+@pytest.fixture
+def connect_proxy():
+    """A minimal HTTP ``CONNECT`` proxy that tunnels to any host:port.
+
+    Lets a test confirm fizzpy reaches an HTTPS host *through* a proxy: the HTTP
+    client performs the CONNECT and hands fizzpy an already-tunnelled socket, so
+    the Fizz handshake rides over the tunnel unchanged — fizzpy never sees the
+    proxy. Exposes ``.url`` and a ``.connects`` count of tunnels opened.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+    srv.settimeout(0.25)
+    stop = threading.Event()
+    counter = {"n": 0}
+
+    def pipe(src: socket.socket, dst: socket.socket):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (src, dst):
+                with contextlib.suppress(OSError):
+                    s.shutdown(socket.SHUT_RDWR)
+
+    def handle(client: socket.socket):
+        upstream = None
+        try:
+            req = b""
+            while b"\r\n\r\n" not in req:
+                chunk = client.recv(4096)
+                if not chunk:
+                    return
+                req += chunk
+            method, target, _ = req.split(b"\r\n", 1)[0].decode("latin1").split(" ", 2)
+            if method != "CONNECT":
+                client.sendall(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+                return
+            host, _, p = target.partition(":")
+            upstream = socket.create_connection((host, int(p)))
+            counter["n"] += 1
+            client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            threading.Thread(target=pipe, args=(upstream, client), daemon=True).start()
+            pipe(client, upstream)
+        except OSError:
+            pass
+        finally:
+            client.close()
+            if upstream is not None:
+                upstream.close()
+
+    def serve():
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                continue
+            threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+
+    class Handle:
+        url = f"http://127.0.0.1:{port}"
+
+        @property
+        def connects(self) -> int:
+            return counter["n"]
+
+    try:
+        yield Handle()
+    finally:
+        stop.set()
+        srv.close()
         thread.join(timeout=5)
 
 
@@ -217,9 +396,9 @@ def _serve_app(cert: str, key: str):
         def log_message(self, *args):
             pass
 
-    port = _free_port()
     _CountingServer.connections = 0
-    httpd = _CountingServer(("::", port), Handler)
+    httpd = _CountingServer(("::", 0), Handler)
+    port = httpd.server_address[1]
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.load_cert_chain(cert, key)
