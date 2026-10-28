@@ -6,7 +6,7 @@
 ARG MANYLINUX_IMAGE=quay.io/pypa/manylinux_2_28_x86_64:latest
 FROM ${MANYLINUX_IMAGE}
 
-ARG FIZZ_TAG=v2026.06.08.00
+ARG FIZZ_TAG=v2026.10.26.00
 ENV FIZZ_TAG=${FIZZ_TAG} \
     GETDEPS_SCRATCH=/opt/fizz-deps \
     FIZZPY_BUILD_INFO=/opt/fizzpy-build \

@@ -21,7 +21,7 @@ from pathlib import Path
 
 # Pin fizz to a release whose getdeps manifests pin a matching folly. liboqs is
 # pinned by fizz's own manifest, so post-quantum support travels with the tag.
-FIZZ_TAG = os.environ.get("FIZZ_TAG", "v2026.06.08.00")
+FIZZ_TAG = os.environ.get("FIZZ_TAG", "v2026.10.26.00")
 FIZZ_SRC = Path(os.environ.get("FIZZ_SRC", "/opt/fizz-src"))
 SCRATCH = os.environ.get("GETDEPS_SCRATCH", "/opt/fizz-deps")
 OUT = Path(os.environ.get("FIZZPY_BUILD_INFO", "/opt/fizzpy-build"))

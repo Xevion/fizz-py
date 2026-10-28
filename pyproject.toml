@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Security :: Cryptography",
     "Typing :: Typed",
@@ -115,7 +116,7 @@ wheel.packages = ["fizzpy"]
 # install prefix from $FIZZPY_BUILD_INFO at configure time. The Python version
 # matrix fans out one image-cached build per interpreter in CI (wheels.yml).
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+build = "cp310-* cp311-* cp312-* cp313-* cp314-* cp315-*"
 skip = "*-musllinux*"
 build-frontend = { name = "pip", args = ["--no-build-isolation"] }
 # --no-build-isolation skips auto-installing the build backend, so install it here.

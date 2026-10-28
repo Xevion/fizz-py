@@ -16,7 +16,7 @@ env:
   # macOS/Windows build fizz from source at this tag; keep it matching the tag the
   # Linux deps image pins (scripts/build_fizz_deps.py) so every platform ships the
   # same fizz. The Linux jobs read their pin from the image, not this var.
-  FIZZ_TAG: v2026.06.08.00
+  FIZZ_TAG: v2026.10.26.00
 
 jobs:
   # The folly+fizz+liboqs tree is baked into a GHCR image tagged by the hash of
@@ -98,7 +98,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [cp310, cp311, cp312, cp313, cp314]
+        python: [cp310, cp311, cp312, cp313, cp314, cp315]
     steps:
       - uses: actions/checkout@v7
 

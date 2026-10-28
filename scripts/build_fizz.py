@@ -25,7 +25,7 @@ from pathlib import Path
 
 # Fizz and Folly are versioned together; this tag must match the Homebrew Folly
 # bottle's ABI (check `brew info folly`).
-FIZZ_TAG = "v2026.06.08.00"
+FIZZ_TAG = "v2026.10.26.00"
 FIZZ_REPO = "https://github.com/facebookincubator/fizz"
 
 REPO = Path(__file__).resolve().parent.parent
