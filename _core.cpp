@@ -802,7 +802,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
   std::string negPeerCert_;
 };
 
-PYBIND11_MODULE(_core, m) {
+PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
   m.doc() = "Low-level Fizz TLS 1.3 client core for fizzpy";
 
   py::enum_<fizz::ProtocolVersion>(m, "ProtocolVersion")

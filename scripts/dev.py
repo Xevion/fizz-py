@@ -27,6 +27,7 @@ scripts/build_fizz_deps.py inside the image if it's missing (~40 min, one-time).
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -34,9 +35,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CONTAINER = "fizzpy-dev"
 IMAGE = "quay.io/pypa/manylinux_2_28_x86_64:latest"
-PYTHON = "/opt/python/cp310-cp310/bin/python"
+# Interpreter tag under /opt/python; FIZZPY_DEV_PYTHON=cp314-cp314t runs the loop
+# on a free-threaded build.
+PY_TAG = os.environ.get("FIZZPY_DEV_PYTHON", "cp310-cp310")
+PYTHON = f"/opt/python/{PY_TAG}/bin/python"
 GETDEPS = REPO / ".dev" / "getdeps"
-SETUP_MARKER = "/opt/.fizzpy-dev-setup-done"
+SETUP_MARKER = f"/opt/.fizzpy-dev-setup-done-{PY_TAG}"
 
 # System packages the static tree links against but doesn't vendor: OpenSSL 1.1
 # dev symlinks (fizz's baked link line references /usr/lib64/libssl.so), libaio
@@ -57,7 +61,7 @@ BUILD_DEPS = [
 # target interpreter on PATH. Prepended to every action that touches the build.
 PREAMBLE = r"""
 set -e
-export PATH="/opt/python/cp310-cp310/bin:$PATH"
+export PATH="/opt/python/{PY_TAG}/bin:$PATH"
 export CMAKE_PREFIX_PATH="$(tr '\n' ';' < /project/.dev/getdeps-prefixes.txt)"
 export FIZZ_CMAKE_MODULE_DIR="$(echo /project/.dev/getdeps/repos/*folly*/build/fbcode_builder/CMake)"
 export LD_LIBRARY_PATH="$(echo /project/.dev/getdeps/installed/*/lib /project/.dev/getdeps/installed/*/lib64 | tr ' ' ':'):${LD_LIBRARY_PATH:-}"
@@ -93,7 +97,13 @@ def _exec(script: str, *, interactive: bool = False) -> int:
     """Run a bash snippet inside the container (with the build env preamble)."""
     flags = ["-it"] if interactive else []
     proc = _docker(
-        "exec", *flags, CONTAINER, "bash", "-c", PREAMBLE + script, check=False
+        "exec",
+        *flags,
+        CONTAINER,
+        "bash",
+        "-c",
+        PREAMBLE.replace("{PY_TAG}", PY_TAG) + script,
+        check=False,
     )
     return proc.returncode
 
@@ -152,7 +162,7 @@ def build() -> None:
     _ensure_up()
     script = (
         f"{PYTHON} -m pip install -e . --no-build-isolation "
-        "-C build-dir=.dev/build-container "
+        f"-C build-dir=.dev/build-container-{PY_TAG} "
         '-C cmake.define.CMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" '
         '-C cmake.define.FIZZ_CMAKE_MODULE_DIR="$FIZZ_CMAKE_MODULE_DIR"'
     )

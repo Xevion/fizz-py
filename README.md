@@ -51,8 +51,8 @@ linked into the extension, so a fresh `pip install` has working post-quantum
 TLS with no system packages to add. `certifi` (pulled in automatically) supplies
 the default trust store.
 
-Wheels are produced by CI (`manylinux_2_28`, x86_64, CPython 3.10–3.15); if one
-isn't available for your platform yet, build from source — see
+Wheels are produced by CI (`manylinux_2_28`, x86_64, CPython 3.10–3.15 plus free-threaded `3.14t`/`3.15t`, which
+run without re-enabling the GIL); if one isn't available for your platform yet, build from source — see
 [BUILDING.md](BUILDING.md).
 
 ## Using fizzpy as your TLS layer
