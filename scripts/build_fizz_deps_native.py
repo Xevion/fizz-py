@@ -103,6 +103,9 @@ def main() -> None:
         run(
             [
                 "git",
+                # CRLF checkouts break `git apply` on getdeps' LF patches.
+                "-c",
+                "core.autocrlf=false",
                 "clone",
                 "--depth",
                 "1",
