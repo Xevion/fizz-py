@@ -36,7 +36,12 @@ OUT = Path(os.environ["FIZZPY_BUILD_INFO"])
 def cmake_defines() -> str:
     # Static-PIC so _core links the tree in wholesale into one self-contained
     # module, matching the Linux build. PIC is a no-op on Windows but harmless.
-    defines = {"CMAKE_POSITION_INDEPENDENT_CODE": "ON"}
+    defines = {
+        "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+        # CMake 4 rejects cmake_minimum_required < 3.5, which the Boost version
+        # pinned by fizz's manifest still declares in several subprojects.
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+    }
     if platform.system() == "Darwin":
         # folly's C++17 (aligned operator new, std::uncaught_exceptions) needs
         # >= 10.13; without this getdeps defaults to 10.9 and folly fails to
