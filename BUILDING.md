@@ -63,8 +63,11 @@ Fizz into the gitignored `.dev/fizz-prefix` once (subsequent runs are a no-op;
 `_core` with `find_package(fizz)` pointed at that prefix.
 
 - **C++20 is required** — current Folly (2026.06) dropped C++17.
-- Fizz and Folly are versioned together. The tag in `scripts/build_fizz.py` must
-  match the Homebrew Folly bottle, or the ABI won't match.
+- Fizz and Folly are versioned together. The Fizz tag lives in
+  `scripts/fizz-tag.txt`, shared by every build path; it must match the Homebrew
+  Folly bottle here, or the ABI won't match (`FIZZ_TAG=... just build` overrides
+  it when brew lags). A monthly workflow (`bump-fizz.yml`) opens a PR when a newer
+  Fizz release exists.
 - `find_package(liboqs CONFIG)` inside Fizz auto-sets `FIZZ_HAVE_OQS` and links
   `OQS::oqs`. `BUILD_EXAMPLES=OFF` is required: the bundled FizzTool fails to
   compile under OpenSSL 3.6 (`-Werror` on the deprecated `EVP_PKEY_cmp`); the
