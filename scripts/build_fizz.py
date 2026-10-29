@@ -24,8 +24,11 @@ import sys
 from pathlib import Path
 
 # Fizz and Folly are versioned together; this tag must match the Homebrew Folly
-# bottle's ABI (check `brew info folly`).
-FIZZ_TAG = "v2026.10.26.00"
+# bottle's ABI (check `brew info folly`). Override with FIZZ_TAG when brew lags
+# the pin shared with the CI builds.
+FIZZ_TAG = (
+    os.environ.get("FIZZ_TAG") or Path(__file__).with_name("fizz-tag.txt").read_text()
+).strip()
 FIZZ_REPO = "https://github.com/facebookincubator/fizz"
 
 REPO = Path(__file__).resolve().parent.parent

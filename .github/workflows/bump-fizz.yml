@@ -1,0 +1,84 @@
+name: Bump Fizz
+
+# Fizz tags weekly and the pin is the only thing keeping wheels current, so a
+# monthly job opens a PR whenever a newer release exists. Pushes and PRs made with
+# GITHUB_TOKEN don't trigger other workflows, but workflow_dispatch is exempt: the
+# job dispatches the full wheel matrix and the lint check on the bump branch, and
+# their results attach to the PR through the branch's head commit.
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  bump:
+    name: Bump Fizz pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Find the newest Fizz release
+        id: latest
+        run: |
+          current=$(tr -d '[:space:]' < scripts/fizz-tag.txt)
+          latest=$(git ls-remote --tags --refs https://github.com/facebookincubator/fizz \
+            | sed 's|.*refs/tags/||' \
+            | grep -E '^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$' \
+            | sort -V | tail -n1)
+          if [ -z "$latest" ]; then
+            echo "no release tags found" >&2
+            exit 1
+          fi
+          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)
+          if [ "$latest" = "$current" ] || [ "$newest" != "$latest" ]; then
+            echo "pin $current is already the newest release"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "bump/fizz-$latest" > /dev/null; then
+            echo "bump/fizz-$latest already exists; leaving it alone"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "bump=true"
+            echo "current=$current"
+            echo "latest=$latest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open the bump PR
+        if: steps.latest.outputs.bump == 'true'
+        env:
+          CURRENT: ${{ steps.latest.outputs.current }}
+          LATEST: ${{ steps.latest.outputs.latest }}
+        run: |
+          branch="bump/fizz-$LATEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          echo "$LATEST" > scripts/fizz-tag.txt
+          git commit -am "build: bump Fizz to $LATEST"
+          git push origin "$branch"
+
+          gh pr create --base "$BASE" --head "$branch" \
+            --title "build: bump Fizz to $LATEST" \
+            --body "Bumps the Fizz pin from $CURRENT to $LATEST ([compare](https://github.com/facebookincubator/fizz/compare/$CURRENT...$LATEST)). The wheel matrix and lint check were dispatched on this branch; merge once they are green."
+
+          gh workflow run wheels.yml --ref "$branch"
+          gh workflow run check.yml --ref "$branch"
+
+          # Older bump PRs are superseded by this one.
+          gh pr list --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"bump/fizz-\")) | select(.headRefName != \"$branch\") | .number" \
+            | while read -r number; do
+                gh pr close "$number" --delete-branch --comment "Superseded by $LATEST."
+              done

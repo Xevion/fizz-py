@@ -25,9 +25,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Pin fizz to a release whose getdeps manifests pin a matching folly. liboqs is
-# pinned by fizz's own manifest, so post-quantum support travels with the tag.
-FIZZ_TAG = os.environ.get("FIZZ_TAG", "v2026.10.26.00")
+# The pin lives in fizz-tag.txt, next to this script, shared by every build path.
+# liboqs is pinned by fizz's own manifest, so post-quantum support travels with it.
+FIZZ_TAG = (
+    os.environ.get("FIZZ_TAG") or Path(__file__).with_name("fizz-tag.txt").read_text()
+).strip()
 FIZZ_SRC = Path(os.environ["FIZZ_SRC"])
 SCRATCH = os.environ["GETDEPS_SCRATCH"]
 OUT = Path(os.environ["FIZZPY_BUILD_INFO"])

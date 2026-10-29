@@ -12,12 +12,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # macOS/Windows build fizz from source at this tag; keep it matching the tag the
-  # Linux deps image pins (scripts/build_fizz_deps.py) so every platform ships the
-  # same fizz. The Linux jobs read their pin from the image, not this var.
-  FIZZ_TAG: v2026.10.26.00
-
 jobs:
   # The folly+fizz+liboqs tree is baked into a GHCR image tagged by the hash of
   # its build inputs. This job rebuilds it only when that hash has no image yet
@@ -41,7 +35,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           repo="ghcr.io/${OWNER,,}/fizz-py-deps"
-          tag="${{ hashFiles('scripts/build_fizz_deps.py', '.github/manylinux-deps.Dockerfile') }}"
+          tag="${{ hashFiles('scripts/build_fizz_deps.py', 'scripts/fizz-tag.txt', '.github/manylinux-deps.Dockerfile') }}"
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
           echo "image=$repo:$tag" >> "$GITHUB_OUTPUT"
 
@@ -172,8 +166,8 @@ jobs:
             echo "VCVARS_PATH=$install\\VC\\Auxiliary\\Build\\vcvarsall.bat"
           } >> "$GITHUB_ENV"
 
-      # The getdeps tree is the ~40-min cost; key it on the build script + tag so a
-      # warm cache turns before-all into a near no-op.
+      # The getdeps tree is the ~40-min cost; key it on the build script + the Fizz
+      # pin (scripts/fizz-tag.txt) so a warm cache turns before-all into a near no-op.
       - name: Cache deps tree
         uses: actions/cache@v6
         with:
@@ -181,7 +175,7 @@ jobs:
             ${{ env.GETDEPS_SCRATCH }}
             ${{ env.FIZZPY_BUILD_INFO }}
             ${{ env.FIZZ_SRC }}
-          key: deps-${{ matrix.os }}-${{ env.FIZZ_TAG }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/build_fizz_deps_native.py') }}
+          key: deps-${{ matrix.os }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/fizz-tag.txt', 'scripts/build_fizz_deps_native.py') }}
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.3.5
