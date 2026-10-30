@@ -18,6 +18,7 @@ jobs:
   # (deps changed, or first run); otherwise it's a fast existence check. Wheels
   # depend on it, so they never run against a missing image.
   deps_image:
+    if: false
     name: Deps image
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -67,6 +68,7 @@ jobs:
             ${{ steps.meta.outputs.repo }}:latest
 
   build_sdist:
+    if: false
     name: Build sdist
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -79,6 +81,7 @@ jobs:
           path: dist/*.tar.gz
 
   build_wheels:
+    if: false
     # One job per interpreter, each compiling _core against the prebuilt deps
     # image (minutes, not ~40 min). liboqs travels with fizz's getdeps manifest,
     # giving real post-quantum (X25519MLKEM768) support.
@@ -132,7 +135,7 @@ jobs:
         # ships VS 2022 (vc143); windows-latest moved to VS 2026, whose toolset Boost
         # 1.83's bootstrap doesn't recognize. Interpreters (cp310-cp314) come from
         # [tool.cibuildwheel] build in pyproject.toml.
-        os: [macos-15-intel, macos-14, windows-2022]
+        os: [windows-2022]
     steps:
       - uses: actions/checkout@v7
 
@@ -168,14 +171,15 @@ jobs:
 
       # The getdeps tree is the ~40-min cost; key it on the build script + the Fizz
       # pin (scripts/fizz-tag.txt) so a warm cache turns before-all into a near no-op.
-      - name: Cache deps tree
-        uses: actions/cache@v6
+      - name: Restore deps tree
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.GETDEPS_SCRATCH }}
             ${{ env.FIZZPY_BUILD_INFO }}
             ${{ env.FIZZ_SRC }}
-          key: deps-${{ matrix.os }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/fizz-tag.txt', 'scripts/build_fizz_deps_native.py') }}
+          key: deps-wip-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: deps-wip-${{ matrix.os }}-
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.3.5
@@ -185,3 +189,13 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
           if-no-files-found: error
+
+      - name: Save deps tree
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.GETDEPS_SCRATCH }}
+            ${{ env.FIZZPY_BUILD_INFO }}
+            ${{ env.FIZZ_SRC }}
+          key: deps-wip-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
