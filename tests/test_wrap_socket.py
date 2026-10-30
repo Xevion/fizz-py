@@ -1,5 +1,6 @@
 """The wrap_socket primitive: a Fizz TLS handshake over a caller-owned socket."""
 
+import os
 import socket
 import ssl
 from urllib.parse import urlsplit
@@ -103,3 +104,19 @@ def test_caller_may_close_original_socket_after_wrap(local_server):
         assert _http_get(tls, "localhost") == b"hello from local tls"
     finally:
         tls.close()
+
+
+@pytest.mark.skipif(
+    not os.path.isdir("/proc/self/fd"), reason="counts descriptors via /proc"
+)
+def test_invalid_config_does_not_leak_the_duplicated_descriptor():
+    a, b = socket.socketpair()
+    before = len(os.listdir("/proc/self/fd"))
+    try:
+        with pytest.raises(ValueError, match="managed"):
+            # 0x33 (key_share) is Fizz-managed, so the config is rejected.
+            fizzpy.wrap_socket(a, "example.test", TlsConfig(extensions=[(0x33, b"x")]))
+        assert len(os.listdir("/proc/self/fd")) == before
+    finally:
+        a.close()
+        b.close()

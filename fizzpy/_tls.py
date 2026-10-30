@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import os
+import socket
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -268,41 +269,63 @@ def wrap_socket(
 ) -> TlsSocket:
     """Perform a Fizz TLS handshake over an already-connected socket.
 
-    ``sock`` must be a connected TCP socket (anything with a ``fileno()``). Its
-    file descriptor is duplicated and the copy is handed to the Fizz event loop,
-    which owns and eventually closes it — so the caller keeps full control of
-    ``sock`` itself (close it whenever; the TLS connection lives on independently
-    through the dup). ``server_hostname`` is the SNI and the name the certificate
-    is matched against; an empty string sends no SNI.
+    ``sock`` must be a connected TCP socket. Its OS handle is duplicated and the
+    copy is handed to the Fizz event loop, which owns and eventually closes it —
+    so the caller keeps full control of ``sock`` itself (close it whenever; the
+    TLS connection lives on independently through the dup). ``server_hostname``
+    is the SNI and the name the certificate is matched against; an empty string
+    sends no SNI.
 
     Returns a :class:`TlsSocket`. Raises on handshake or verification failure.
     """
     config = config or TlsConfig()
     conn = _core.TlsConnection()
-    dup = os.dup(sock.fileno())
-    run_sync(_wrap_fd_submit(conn, dup, server_hostname, config))
-    return TlsSocket(conn, server_hostname, config.timeout, dup)
+    submit, handle = _prepare_wrap(conn, sock, server_hostname, config)
+    run_sync(submit)
+    return TlsSocket(conn, server_hostname, config.timeout, handle)
 
 
-def _wrap_fd_submit(
-    conn: _core.TlsConnection, fd: int, server_hostname: str, config: TlsConfig
-) -> Submit:
-    """The ``wrap_fd`` call for ``conn``, shaped for ``run_sync``/``run_async``.
+def _dup_handle(sock: Any) -> int:
+    """Duplicate ``sock``'s OS handle for the Fizz loop to own.
 
-    ``wrap_fd`` takes ownership of ``fd`` on every outcome (it closes it on
-    failure too), so the caller has no fd to clean up whether or not it succeeds.
+    ``socket.dup`` is the portable call: on Windows ``fileno()`` is a SOCKET, which
+    ``os.dup`` cannot duplicate, and the detached copy is again a SOCKET there
+    (and an ordinary descriptor everywhere else). Other objects that only offer a
+    ``fileno()`` are assumed to be POSIX descriptors.
     """
-    return lambda resolve, reject: conn.wrap_fd(
-        fd,
-        server_hostname,
-        list(config.alpn),
-        list(config.groups),
-        config.verify,
-        config.resolved_cafile,
-        config.timeout_ms,
-        config.normalized_extensions(),
-        resolve,
-        reject,
+    if isinstance(sock, socket.socket):
+        return sock.dup().detach()
+    return os.dup(sock.fileno())
+
+
+def _prepare_wrap(
+    conn: _core.TlsConnection, sock: Any, server_hostname: str, config: TlsConfig
+) -> tuple[Submit, int]:
+    """The ``wrap_fd`` call for ``conn`` and the handle it adopts.
+
+    Everything that can raise is evaluated before the handle is duplicated, so a
+    bad config cannot leak it. Once ``wrap_fd`` runs it owns the handle on every
+    outcome (it closes it on failure too), so the caller has nothing to clean up.
+    """
+    alpn = list(config.alpn)
+    groups = list(config.groups)
+    cafile = config.resolved_cafile
+    extensions = config.normalized_extensions()
+    handle = _dup_handle(sock)
+    return (
+        lambda resolve, reject: conn.wrap_fd(
+            handle,
+            server_hostname,
+            alpn,
+            groups,
+            config.verify,
+            cafile,
+            config.timeout_ms,
+            extensions,
+            resolve,
+            reject,
+        ),
+        handle,
     )
 
 
@@ -313,14 +336,13 @@ async def handshake_async(
 ) -> _core.TlsConnection:
     """Handshake over a connected socket without blocking the running event loop.
 
-    Same fd handling as :func:`wrap_socket` (the descriptor is duplicated, so the
+    Same handle handling as :func:`wrap_socket` (the handle is duplicated, so the
     caller keeps ``sock``), but awaits the handshake on the asyncio loop and
     returns the established connection for the caller to read ``negotiated()``
     from, drive, and ``close()``.
     """
     config = config or TlsConfig()
     conn = _core.TlsConnection()
-    await run_async(
-        _wrap_fd_submit(conn, os.dup(sock.fileno()), server_hostname, config)
-    )
+    submit, _ = _prepare_wrap(conn, sock, server_hostname, config)
+    await run_async(submit)
     return conn

@@ -106,7 +106,7 @@ class TlsConnection:
     ) -> None: ...
     def wrap_fd(
         self,
-        fd: int,
+        handle: int,
         sni: str,
         alpns: list[str],
         groups: list[NamedGroup],

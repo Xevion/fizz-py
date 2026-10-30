@@ -24,6 +24,7 @@
 #include <openssl/x509v3.h>
 
 #include <cassert>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -155,6 +156,14 @@ py::object tlsErrorFromAsyncSocket(const folly::AsyncSocketException& ex) {
   bool certError = msg.find("certificate") != std::string::npos ||
       msg.find("does not match hostname") != std::string::npos;
   return makeTlsError(msg, certError);
+}
+
+// Python hands over the platform's native socket handle: a plain descriptor on
+// POSIX, a SOCKET on Windows. NetworkSocket::fromFd would read a SOCKET as a CRT
+// file descriptor there, so build the NetworkSocket from the native type instead.
+folly::NetworkSocket adoptHandle(std::intptr_t handle) {
+  return folly::NetworkSocket(
+      static_cast<folly::NetworkSocket::native_handle_type>(handle));
 }
 
 // An empty server name means "send no SNI": RFC 6066 forbids IP literals there,
@@ -363,7 +372,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
   // Resolves with None on handshake success; rejects with ssl.SSLError
   // (ssl.SSLCertVerificationError for a verification failure) on a TLS failure.
   void wrapFd(
-      int fd,
+      std::intptr_t handle,
       const std::string& sni,
       std::vector<std::string> alpns,
       std::vector<fizz::NamedGroup> groups,
@@ -383,7 +392,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
             std::move(extensions));
 
     evb_->runInEventBaseThread([this,
-                                fd,
+                                handle,
                                 sni,
                                 alpnsPtr,
                                 groupsPtr,
@@ -399,9 +408,9 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
       folly::AsyncSocket::UniquePtr sock;
       try {
         sock = folly::AsyncSocket::newSocket(
-            evb_, folly::NetworkSocket::fromFd(fd));
+            evb_, adoptHandle(handle));
       } catch (const std::exception& e) {
-        folly::netops::close(folly::NetworkSocket::fromFd(fd));
+        folly::netops::close(adoptHandle(handle));
         rejectOnLoop(promise, std::string("wrap failed: ") + e.what());
         return;
       }
@@ -938,7 +947,7 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
       .def(
           "wrap_fd",
           &TlsConnection::wrapFd,
-          py::arg("fd"),
+          py::arg("handle"),
           py::arg("sni"),
           py::arg("alpns"),
           py::arg("groups"),
