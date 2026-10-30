@@ -116,9 +116,12 @@ py::object makeTlsError(
     bool certError,
     const std::string& alertName = "") {
   auto ssl = py::module_::import("ssl");
+  // (code, message) is the shape the stdlib's own errors carry; a lone argument
+  // would make str(error) a tuple repr.
+  auto code = ssl.attr("SSL_ERROR_SSL");
   py::object err = certError
-      ? ssl.attr("SSLCertVerificationError")(msg)
-      : ssl.attr("SSLError")(std::string("handshake failed: ") + msg);
+      ? ssl.attr("SSLCertVerificationError")(code, msg)
+      : ssl.attr("SSLError")(code, std::string("handshake failed: ") + msg);
   std::string received = receivedAlertName(msg);
   bool remote = !received.empty();
   const std::string& alert = remote ? received : alertName;

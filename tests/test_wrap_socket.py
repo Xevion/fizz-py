@@ -120,3 +120,32 @@ def test_invalid_config_does_not_leak_the_duplicated_descriptor():
     finally:
         a.close()
         b.close()
+
+
+def test_handshake_error_reads_like_a_stdlib_ssl_error(tls12_server):
+    # A one-argument SSLError stringifies as a tuple repr; the stdlib's own errors
+    # carry (code, message), which str() renders as just the message.
+    sock = _connect(tls12_server.url)
+    try:
+        with pytest.raises(ssl.SSLError) as excinfo:
+            fizzpy.wrap_socket(sock, "localhost", TlsConfig(verify=False))
+    finally:
+        sock.close()
+
+    error = excinfo.value
+    assert error.args[0] == ssl.SSL_ERROR_SSL
+    assert str(error).startswith("handshake failed: ")
+    assert not str(error).startswith("(")
+
+
+def test_certificate_error_reads_like_a_stdlib_ssl_error(self_signed_server):
+    url, _ = self_signed_server
+    sock = _connect(url)
+    try:
+        with pytest.raises(ssl.SSLCertVerificationError) as excinfo:
+            fizzpy.wrap_socket(sock, "localhost", TlsConfig())
+    finally:
+        sock.close()
+
+    assert excinfo.value.args[0] == ssl.SSL_ERROR_SSL
+    assert not str(excinfo.value).startswith("(")

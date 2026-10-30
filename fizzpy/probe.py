@@ -224,8 +224,7 @@ def _reason(exc: BaseException) -> str:
         return "name not resolved"
     if isinstance(exc, OSError) and exc.errno in _UNREACHABLE:
         return "network unreachable"
-    # SSLError stringifies a lone argument as a tuple, so read the argument itself.
-    text = str(exc.args[-1]) if exc.args else str(exc)
+    text = str(exc)
     lowered = text.lower()
     if "timed out" in lowered:
         return "timeout"
