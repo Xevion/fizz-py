@@ -84,6 +84,23 @@ def patch_folly_sse2() -> None:
             print(f"patched {cml}: -mno-sse2 -> -msse2 (macOS 15 SDK _Float16)")
 
 
+def patch_glog_shared() -> None:
+    """Build glog as a DLL on Windows, matching the gflags it links against.
+
+    fizz's glog manifest only builds shared on request, but gflags is always built
+    shared too, so a static glog on MSVC redefines every gflags flag as a dllimport
+    (C2370). The DLLs are vendored into the wheel by repair_wheel_windows.py.
+    """
+    if platform.system() != "Windows":
+        return
+    manifest = FIZZ_SRC / "build" / "fbcode_builder" / "manifests" / "glog"
+    text = manifest.read_text()
+    section = "[cmake.defines.os=windows]"
+    if section not in text:
+        manifest.write_text(f"{text}\n{section}\nBUILD_SHARED_LIBS=ON\n")
+        print(f"patched {manifest}: glog builds shared on Windows")
+
+
 def main() -> None:
     getdeps = str(FIZZ_SRC / "build" / "fbcode_builder" / "getdeps.py")
     common = [
@@ -117,6 +134,8 @@ def main() -> None:
                 str(FIZZ_SRC),
             ]
         )
+
+    patch_glog_shared()
 
     # Fetch all sources first so folly can be patched before it compiles.
     # --recursive is required: a bare `fetch fizz` clones only fizz, not its
