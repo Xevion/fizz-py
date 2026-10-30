@@ -31,6 +31,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+fizzpy = "fizzpy.__main__:main"
+
 [project.urls]
 Repository = "https://github.com/Xevion/fizz-py"
 Issues = "https://github.com/Xevion/fizz-py/issues"
@@ -125,6 +128,8 @@ build-frontend = { name = "pip", args = ["--no-build-isolation"] }
 # --no-build-isolation skips auto-installing the build backend, so install it here.
 # Identical on every platform, so it lives at the top level.
 before-build = "pip install scikit-build-core pybind11 pybind11-stubgen"
+# Fails any wheel built without liboqs (see the script); runs from the installed wheel.
+test-command = "python {project}/scripts/wheel_smoke.py"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]

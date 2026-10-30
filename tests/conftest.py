@@ -15,6 +15,7 @@ import contextlib
 import http.server
 import socket
 import ssl
+import struct
 import subprocess
 import threading
 
@@ -546,3 +547,127 @@ def ca_server(tmp_path):
         for httpd, thread in started:
             httpd.shutdown()
             thread.join(timeout=5)
+
+
+@pytest.fixture
+def hello_limit_proxy():
+    """Factory for a TCP forwarder that mishandles large ClientHellos.
+
+    ``make(upstream_port, action="reset"|"drop", limit=600) -> port``. A
+    ClientHello record bigger than ``limit`` bytes is answered with a TCP reset
+    (``reset``) or silence (``drop``); smaller ones are forwarded untouched. A
+    post-quantum ClientHello carries a ~1.2KB key share against ~250 bytes
+    classical, so this stands in for the middleboxes and old stacks that break
+    only the post-quantum handshake.
+    """
+    servers: list[socket.socket] = []
+    stop = threading.Event()
+
+    def pipe(src: socket.socket, dst: socket.socket):
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (src, dst):
+                with contextlib.suppress(OSError):
+                    s.shutdown(socket.SHUT_RDWR)
+
+    def make(upstream_port: int, *, action: str, limit: int = 600) -> int:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(16)
+        servers.append(srv)
+
+        def handle(client: socket.socket):
+            upstream = None
+            try:
+                header = _recv_exact(client, 5)
+                if len(header) < 5:
+                    return
+                length = int.from_bytes(header[3:5], "big")
+                body = _recv_exact(client, length)
+                if length > limit:
+                    if action == "reset":
+                        linger = struct.pack("ii", 1, 0)
+                        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger)
+                    else:
+                        stop.wait(30)
+                    return
+                upstream = socket.create_connection(("127.0.0.1", upstream_port))
+                upstream.sendall(header + body)
+                threading.Thread(
+                    target=pipe, args=(upstream, client), daemon=True
+                ).start()
+                pipe(client, upstream)
+            except OSError:
+                pass
+            finally:
+                client.close()
+                if upstream is not None:
+                    upstream.close()
+
+        def serve():
+            while True:
+                try:
+                    conn, _ = srv.accept()
+                except OSError:
+                    return
+                threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+        return srv.getsockname()[1]
+
+    try:
+        yield make
+    finally:
+        stop.set()
+        for srv in servers:
+            srv.close()
+
+
+@pytest.fixture
+def scripted_server():
+    """Factory for a plain-TCP listener with a canned reply: ``make(reply) -> port``.
+
+    Reads the client's first flight, writes ``reply`` (may be empty), and closes.
+    Stands in for a port that accepts connections but does not speak TLS.
+    """
+    servers: list[socket.socket] = []
+
+    def make(reply: bytes) -> int:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(16)
+        servers.append(srv)
+
+        def handle(client: socket.socket):
+            try:
+                # Take the whole ClientHello so closing never resets the peer.
+                header = _recv_exact(client, 5)
+                if len(header) == 5 and header[0] == 0x16:
+                    _recv_exact(client, int.from_bytes(header[3:5], "big"))
+                client.sendall(reply)
+            except OSError:
+                pass
+            finally:
+                client.close()
+
+        def serve():
+            while True:
+                try:
+                    conn, _ = srv.accept()
+                except OSError:
+                    return
+                threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+        return srv.getsockname()[1]
+
+    try:
+        yield make
+    finally:
+        for srv in servers:
+            srv.close()

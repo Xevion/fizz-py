@@ -39,7 +39,7 @@ from ._common import (
     normalize_extensions,
     timeout_to_ms,
 )
-from ._transport import run_sync
+from ._transport import Submit, run_async, run_sync
 
 __all__ = ["TlsConfig", "TlsSocket", "wrap_socket"]
 
@@ -273,27 +273,54 @@ def wrap_socket(
     which owns and eventually closes it — so the caller keeps full control of
     ``sock`` itself (close it whenever; the TLS connection lives on independently
     through the dup). ``server_hostname`` is the SNI and the name the certificate
-    is matched against.
+    is matched against; an empty string sends no SNI.
 
     Returns a :class:`TlsSocket`. Raises on handshake or verification failure.
     """
     config = config or TlsConfig()
     conn = _core.TlsConnection()
     dup = os.dup(sock.fileno())
-    # wrap_fd takes ownership of `dup` on every outcome (it closes it on failure
-    # too), so there is no fd to clean up here regardless of success.
-    run_sync(
-        lambda resolve, reject: conn.wrap_fd(
-            dup,
-            server_hostname,
-            list(config.alpn),
-            list(config.groups),
-            config.verify,
-            config.resolved_cafile,
-            config.timeout_ms,
-            config.normalized_extensions(),
-            resolve,
-            reject,
-        )
-    )
+    run_sync(_wrap_fd_submit(conn, dup, server_hostname, config))
     return TlsSocket(conn, server_hostname, config.timeout, dup)
+
+
+def _wrap_fd_submit(
+    conn: _core.TlsConnection, fd: int, server_hostname: str, config: TlsConfig
+) -> Submit:
+    """The ``wrap_fd`` call for ``conn``, shaped for ``run_sync``/``run_async``.
+
+    ``wrap_fd`` takes ownership of ``fd`` on every outcome (it closes it on
+    failure too), so the caller has no fd to clean up whether or not it succeeds.
+    """
+    return lambda resolve, reject: conn.wrap_fd(
+        fd,
+        server_hostname,
+        list(config.alpn),
+        list(config.groups),
+        config.verify,
+        config.resolved_cafile,
+        config.timeout_ms,
+        config.normalized_extensions(),
+        resolve,
+        reject,
+    )
+
+
+async def handshake_async(
+    sock: Any,
+    server_hostname: str,
+    config: TlsConfig | None = None,
+) -> _core.TlsConnection:
+    """Handshake over a connected socket without blocking the running event loop.
+
+    Same fd handling as :func:`wrap_socket` (the descriptor is duplicated, so the
+    caller keeps ``sock``), but awaits the handshake on the asyncio loop and
+    returns the established connection for the caller to read ``negotiated()``
+    from, drive, and ``close()``.
+    """
+    config = config or TlsConfig()
+    conn = _core.TlsConnection()
+    await run_async(
+        _wrap_fd_submit(conn, os.dup(sock.fileno()), server_hostname, config)
+    )
+    return conn

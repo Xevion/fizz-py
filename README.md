@@ -274,6 +274,70 @@ fizzpy.Client(cafile="/path/to/ca.pem")   # trust a specific CA
 fizzpy.Client(verify=False)               # accept any certificate (insecure)
 ```
 
+## Probing a server for post-quantum support
+
+A normal handshake only shows what the server *chose*, and a server that prefers
+x25519 looks the same as one that cannot do ML-KEM at all. `fizzpy probe` offers
+one key-exchange group per connection and records the server's answer:
+
+```console
+$ fizzpy probe www.cloudflare.com github.com 127.0.0.1:8443
+HOST                VERDICT         PREFERRED       ML-KEM  x25519  P-256  P-384
+www.cloudflare.com  post-quantum    X25519MLKEM768  ok      ok      ok     ok
+github.com          classical-only  x25519          rej     ok      ok     rej
+127.0.0.1:8443      unreachable     -               -       -       -      -      connect: connection refused
+```
+
+`ok` is a completed handshake, `rej` a TLS alert from the server, and `FAIL` a
+connection that broke without one. The verdicts:
+
+| Verdict | Meaning |
+| --- | --- |
+| `post-quantum` | completes a handshake with X25519MLKEM768 |
+| `classical-only` | TLS 1.3 works, but the server rejects the ML-KEM group |
+| `pq-blocked` | classical handshakes work, but the post-quantum ClientHello breaks the handshake (reset, dropped, closed, or an alert other than "no common group"). A server, a middlebox and the path look the same from here |
+| `no-tls13` | every offer drew a "no TLS 1.3 / no common group" alert |
+| `unreachable` | no TCP connection (DNS, refused, timeout) |
+| `error` | connected, but no handshake worked for another reason (not a TLS port, or the server refused the name; the `error` field says which) |
+
+`pq-blocked` is the failure that actually breaks clients rolling out ML-KEM, and
+it is invisible to a normal request: the host works classically. A suspected
+block is retried once before it is reported.
+
+```sh
+fizzpy probe -f hosts.txt              # one target per line, '#' comments allowed
+fizzpy probe -v example.com            # every handshake: timings, alerts, cipher, cert
+fizzpy probe --json -f hosts.txt       # one JSON object per host, as each finishes
+fizzpy probe --require-pq example.com  # exit 1 unless every target is post-quantum
+```
+
+Targets are `host`, `host:port`, `[v6]:port` or an `https://` URL; `-c` sets how
+many hosts are probed at once and `-t` the per-step timeout in seconds. Certificates
+are deliberately not validated: this measures key-exchange support, not trust. All
+of a host's probes go to the first address that accepts a connection, and the
+result records which one; a CDN or proxy answers for itself, not its origin. An IP
+target sends no server name (RFC 6066 forbids one), so the answer is the default
+virtual host's; `--sni NAME` sets one. Only X25519MLKEM768, x25519, secp256r1 and secp384r1 are
+probed, because those are the groups Fizz can run a key exchange for.
+
+The same thing is available as a library:
+
+```python
+import asyncio
+from fizzpy.probe import probe, probe_many
+
+result = asyncio.run(probe("www.cloudflare.com"))
+print(result.verdict, result.accepted_groups, result.preferred)
+
+async def scan(hosts):
+    async for r in probe_many(hosts, concurrency=64):   # results as they complete
+        print(r.host, r.verdict.value)
+```
+
+`fizzpy.supports_post_quantum()` tells you whether the installed build can do
+ML-KEM at all (always true for the wheels; false for a source build against a Fizz
+without liboqs, where the probe refuses to run).
+
 ## Status
 
 What works today:
@@ -282,6 +346,7 @@ What works today:
   via `FizzHTTPTransport`, and under any client that accepts a socket via
   `wrap_socket`
 - TLS 1.3 handshake with classical or post-quantum (ML-KEM) key exchange
+- `fizzpy probe`: per-group post-quantum readiness checks for one host or thousands
 - Built-in client: `GET`/`POST`/`HEAD`/`PUT`/`DELETE`, sync and async
 - HTTP/1.1 response framing (content-length, chunked, gzip/deflate)
 - Connection keep-alive with a per-host pool; automatic redirect following
