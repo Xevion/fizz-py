@@ -33,12 +33,11 @@ namespace py = pybind11;
 
 namespace {
 
-// One background thread runs the folly EventBase that drives every connection.
-// Fizz is callback-driven on this loop; the Python facades never touch it
-// directly — they schedule work here and are resolved via Python callables.
+// One leaked thread runs the EventBase that drives every connection; joining it
+// from a static destructor at module unload crashes the process on Windows.
 folly::EventBase* sharedEvb() {
-  static folly::ScopedEventBaseThread thread("fizzpy-evb");
-  return thread.getEventBase();
+  static auto* const thread = new folly::ScopedEventBaseThread("fizzpy-evb");
+  return thread->getEventBase();
 }
 
 // Holds the resolve/reject pair for one pending async op. py::function refcounts
