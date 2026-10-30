@@ -38,6 +38,7 @@ from ._common import (
     normalize_extensions,
     parse_url,
     strip_body_headers,
+    supports_post_quantum,
     timeout_to_ms,
 )
 from ._core import NamedGroup
@@ -61,6 +62,7 @@ __all__ = [
     "post",
     "put",
     "request",
+    "supports_post_quantum",
     "wrap_socket",
 ]
 

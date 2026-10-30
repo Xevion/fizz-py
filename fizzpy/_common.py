@@ -59,10 +59,22 @@ class TooManyRedirects(Exception):
     """Raised when a request exceeds the client's redirect limit."""
 
 
-# Offer the standardized post-quantum hybrid group first, with classical x25519
-# as fallback — mirroring how Chrome/Firefox send both key shares by default.
-# A server without ML-KEM support simply selects x25519 from our shares.
-DEFAULT_GROUPS = [_core.NamedGroup.x25519_mlkem768, _core.NamedGroup.x25519]
+def supports_post_quantum() -> bool:
+    """Whether this build of fizzpy can do the post-quantum hybrid key exchange.
+
+    False for a source build against a Fizz compiled without liboqs (the Homebrew
+    bottle, for one); the prebuilt wheels always return True.
+    """
+    return _core.pq_supported()
+
+
+# Hybrid first, classical x25519 behind it, like Chrome/Firefox send both shares.
+# Without liboqs the hybrid share can't be generated, so x25519 goes alone.
+DEFAULT_GROUPS = (
+    [_core.NamedGroup.x25519_mlkem768, _core.NamedGroup.x25519]
+    if supports_post_quantum()
+    else [_core.NamedGroup.x25519]
+)
 
 
 class Extension(NamedTuple):

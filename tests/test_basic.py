@@ -65,6 +65,12 @@ def test_default_groups_lead_with_post_quantum():
     assert _core.NamedGroup.x25519 in DEFAULT_GROUPS
 
 
+def test_wheels_support_post_quantum():
+    # A build without liboqs would silently lose the project's whole point, so
+    # the build under test must report it.
+    assert fizzpy.supports_post_quantum() is True
+
+
 def test_public_api_surface():
     for name in ("Client", "get", "post", "request", "Response"):
         assert hasattr(fizzpy, name)

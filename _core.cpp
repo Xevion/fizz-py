@@ -84,6 +84,20 @@ py::object makeTimeoutError(const std::string& msg) {
   return py::module_::import("socket").attr("timeout")(msg);
 }
 
+// Fizz reports an alert sent by the peer only as message text ("received alert:
+// <name>, in state ..."), with no typed description on the exception. Lift the
+// name out so Python sees the same `fizz_alert` tag as for a locally raised alert.
+std::string receivedAlertName(const std::string& msg) {
+  static const std::string marker = "received alert: ";
+  auto pos = msg.find(marker);
+  if (pos == std::string::npos) {
+    return "";
+  }
+  auto start = pos + marker.size();
+  auto end = msg.find_first_not_of("abcdefghijklmnopqrstuvwxyz_", start);
+  return msg.substr(start, end == std::string::npos ? end : end - start);
+}
+
 // Build the Python exception for a TLS *handshake* failure (GIL must be held).
 // Mapping to ssl's own exception types — rather than a generic ConnectionError —
 // is what lets clients layered on top classify the failure the way they do for
@@ -95,7 +109,8 @@ py::object makeTimeoutError(const std::string& msg) {
 // known, `alertName` (e.g. "protocol_version") is attached as a `fizz_alert`
 // attribute so Python can classify the failure on a typed signal instead of
 // scraping the message text — the stdlib fallback keys its downgrade decision
-// on exactly this.
+// on exactly this. `fizz_alert_remote` says whether the peer sent that alert
+// (lifted from the message) or this side raised it.
 py::object makeTlsError(
     const std::string& msg,
     bool certError,
@@ -104,8 +119,12 @@ py::object makeTlsError(
   py::object err = certError
       ? ssl.attr("SSLCertVerificationError")(msg)
       : ssl.attr("SSLError")(std::string("handshake failed: ") + msg);
-  if (!alertName.empty()) {
-    err.attr("fizz_alert") = py::str(alertName);
+  std::string received = receivedAlertName(msg);
+  bool remote = !received.empty();
+  const std::string& alert = remote ? received : alertName;
+  if (!alert.empty()) {
+    err.attr("fizz_alert") = py::str(alert);
+    err.attr("fizz_alert_remote") = py::bool_(remote);
   }
   return err;
 }
@@ -858,6 +877,20 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
       .value("Always", fizz::client::SendKeyShare::Always)
       .value("WhenNecessary", fizz::client::SendKeyShare::WhenNecessary)
       .export_values();
+
+  // Asks the handshake's own factory for the hybrid key share, which fails when
+  // Fizz lacks liboqs. The context's default group list is gated on a macro we never see.
+  m.def("pq_supported", [] {
+    fizz::client::FizzClientContext ctx;
+    std::unique_ptr<fizz::KeyExchange> kex;
+    fizz::Error err;
+    auto status = ctx.getFactory()->makeKeyExchange(
+        kex,
+        err,
+        fizz::NamedGroup::X25519MLKEM768,
+        fizz::KeyExchangeRole::Client);
+    return status == fizz::Status::Success && kex != nullptr;
+  });
 
   py::class_<fizz::client::FizzClientContext>(m, "FizzClientContext")
       .def(py::init<>())

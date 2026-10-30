@@ -23,6 +23,9 @@ def test_fizz_alone_cannot_handshake_tls12(tls12_server):
         with pytest.raises(ssl.SSLError) as excinfo:
             FizzSSLContext(TlsConfig(verify=False)).wrap_socket(sock, "127.0.0.1")
         assert "protocol_version" in str(excinfo.value)
+        # The peer's alert is tagged on the exception, not just in its message.
+        assert excinfo.value.fizz_alert == "protocol_version"
+        assert excinfo.value.fizz_alert_remote is True
     finally:
         sock.close()
 
