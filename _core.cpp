@@ -158,6 +158,15 @@ py::object tlsErrorFromAsyncSocket(const folly::AsyncSocketException& ex) {
   return makeTlsError(msg, certError);
 }
 
+// An empty server name means "send no SNI": RFC 6066 forbids IP literals there,
+// and an empty host_name is not a valid substitute.
+folly::Optional<std::string> sniOrNone(const std::string& sni) {
+  if (sni.empty()) {
+    return folly::none;
+  }
+  return sni;
+}
+
 // Wraps a chain verifier (e.g. DefaultCertificateVerifier) and adds the
 // hostname/SAN matching that Fizz's verifiers deliberately omit. Chain validity
 // is checked first; only then is the leaf certificate matched against the host
@@ -337,7 +346,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
             addr,
             cb,
             setup.verifier,
-            folly::Optional<std::string>(sni),
+            sniOrNone(sni),
             folly::Optional<std::string>(),
             std::chrono::milliseconds(timeoutMs),
             std::chrono::milliseconds(timeoutMs));
@@ -408,7 +417,7 @@ class TlsConnection : public folly::AsyncTransportWrapper::ReadCallback {
         client_->connect(
             cb,
             setup.verifier,
-            folly::Optional<std::string>(sni),
+            sniOrNone(sni),
             folly::Optional<std::string>(),
             folly::none,
             std::chrono::milliseconds(timeoutMs));

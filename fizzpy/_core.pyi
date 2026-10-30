@@ -89,6 +89,7 @@ class TlsConnection:
     """
 
     def __init__(self) -> None: ...
+    # An empty ``sni`` sends no server_name extension (use it for IP literals).
     def connect(
         self,
         host: str,
