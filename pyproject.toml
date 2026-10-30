@@ -145,6 +145,12 @@ archs = ["x86_64"]
 # `environment` table's restricted evaluator).
 repair-wheel-command = "LD_LIBRARY_PATH=\"$(echo /opt/fizz-deps/installed/*/lib /opt/fizz-deps/installed/*/lib64 | tr ' ' ':'):$LD_LIBRARY_PATH\" auditwheel repair -w {dest_dir} {wheel}"
 
+# The offline suite runs against each built wheel, so the Fizz that actually ships
+# is exercised (the dev loop's tree can lag the pin). The fixtures shell out to
+# `openssl`, which the manylinux image provides; macOS/Windows keep the smoke test.
+test-requires = ["pytest", "requests", "httpx"]
+test-command = "python {project}/scripts/wheel_smoke.py && python -m pytest {project}/tests -m 'not network' -q"
+
 [tool.cibuildwheel.linux.environment]
 FIZZPY_BUILD_INFO = "/opt/fizzpy-build"
 
